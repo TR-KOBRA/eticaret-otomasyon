@@ -1,7 +1,9 @@
 # E-ticaret otomasyonu
 
 Türkiye pazarı için AliExpress'ten ürün bulup marka, mağaza, içerik ve reklama giden modüler hat.
-Her modül `eticaret/<modul>/` altında; bir öncekinin JSON çıktısını okur, kendi JSON + .md raporunu `cikti/` altına yazar.
+Adım 1 `urun-arastirma/` (kendi CLI'ı), adım 2–11 `hat.py` + `hat/<adim>.py`: her ürün `projeler/<ad>/` klasörü,
+adımlar `durum.json`daki onay kapılarıyla sırayla çalışır (bkz. `README.md`). Yeni adım eklerken `hat/ortak.py` ADIMLAR'a
+kaydet, `calistir(p: Proje, args)` yaz, `p.yaz(adim, veri, md)` ile çıktı ver, metin üretiminde `metin_json` (ortak KURALLAR) kullan.
 
 ## Bilgi bankası (her işten önce ilgili özeti oku)
 `kaynaklar/ozetler/` — kullanıcının e-ticaret eğitim dokümanlarından çıkarılmış kurallar:
@@ -21,6 +23,11 @@ Yeni doküman gelirse: `kaynaklar/gelen/`e konur → metni çıkar → ilgili ö
 - Satın alınmış takipçi/beğeni, sahte yorum, lisanssız (nulled) tema kullanılmaz.
 - Sağlık vaadi, abartılı kazanç vaadi, ürünü yansıtmayan yanıltıcı görsel üretilmez.
 - Para harcayan veya dışarı yayın yapan adımlar (numune, reklam, paylaşım, domain) insan onayında durur.
+
+## Bilinen durumlar
+- Gemini görsel modelleri ücretsiz katmanda kota 0 → faturalandırma açılana kadar görsel adımı satıcı fotoğraflarını GEÇİCİ kullanır.
+- Shopify/Meta gönderimi kodlu ama gerçek hesapla test edilmedi (API sürümü `SHOPIFY_API_SURUM`, `META_API_SURUM`).
+- `projeler/deneme` elenmiş bir ürünle (`--zorla`) uçtan uca test projesidir.
 
 ## Çalıştırma
 `eticaret/urun-arastirma/`: `python -W ignore arastir.py kesfet "<ingilizce kelime>"` ve `arastir.py urun <link> --kelime "<türkçe>" --trendyol`.
