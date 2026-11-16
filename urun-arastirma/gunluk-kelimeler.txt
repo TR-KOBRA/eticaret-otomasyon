@@ -1,0 +1,18 @@
+# Günlük ürün taraması kelime listesi. Her gün sıradaki satır taranır, liste bitince başa döner.
+# Biçim:  ingilizce arama kelimesi | türkçe pazar kelimesi
+# Satır eklemek/silmek serbest; # ile başlayan satırlar atlanır.
+car seat gap organizer | koltuk arası düzenleyici
+pet hair remover roller | tüy toplama rulosu
+cable organizer box | kablo düzenleyici kutu
+portable blender bottle | taşınabilir blender
+led motion sensor light | sensörlü led lamba
+silicone stretch lids | silikon streç kapak
+under sink organizer | lavabo altı düzenleyici
+sink caddy organizer | lavabo süngerlik
+electric lint remover | tüy yumağı alma makinesi
+drawer organizer | çekmece düzenleyici
+reusable lint roller | yıkanabilir tüy toplayıcı
+car phone holder magnetic | mıknatıslı araç telefon tutucu
+shoe storage organizer | ayakkabı düzenleyici
+mini sealing machine | poşet ağzı kapatma makinesi
+vegetable chopper | sebze doğrayıcı

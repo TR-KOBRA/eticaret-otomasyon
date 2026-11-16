@@ -320,6 +320,7 @@ def rapor(u: dict, rk, tr, senaryo: str, kanal: str):
     yol = kaydet(f"urun-{u['id']}", veri, "\n".join(md))
     sk = d["skor"]
     print(f"✓ Karar: {sk['karar']} ({sk['toplam']}/20) · Rapor: {yol}")
+    return yol, d
 
 
 def skorla(args):

@@ -186,6 +186,10 @@ def puanla(u: dict, secenekler: list[dict], kargo_risk: dict, iade_orani: float,
         bayraklar = [f"Yüksek risk: {x}" for x in yuksek] + bayraklar
     elif eksik and en_fazla >= 15 > toplam:
         karar = "EKSİK VERİ"
+    elif toplam >= 15 and (sonuc.get("kar_marji") or {}).get("puan") == 0:
+        # Piyasa fiyatında kâr yoksa diğer kriterler ne kadar iyi olursa olsun test edilmez (fiyat-kar.md: hedef net marj ≥ %20)
+        karar = "İYİLEŞTİR"
+        bayraklar = ["Rakip fiyatında net kâr yok → maliyeti düşür, paket/teklifle fiyatı yükselt ya da ele"] + bayraklar
     elif toplam >= 15:
         karar = "TESTE AL"
     elif toplam >= 10:

@@ -16,7 +16,28 @@ AliExpress ürününden Türkiye'de satışa kadar 11 adım. Adım 1 `urun-arast
 11 operasyon müşteri mesajları, stok eşiği, haftalık net kâr tablosu
 ```
 
-## Kullanım
+## Panel (önerilen)
+
+Masaüstündeki **E-ticaret Paneli** kısayolu ya da `panel/panel_ac.cmd` → http://127.0.0.1:8765 (sadece bu bilgisayar).
+
+| Sayfa | Ne yapar |
+|---|---|
+| Ana sayfa | yapılacaklar (onay bekleyen / çalıştırılabilir adımlar, TESTE AL adaylar), satış hattı, Apify bütçesi |
+| Ürün keşfi | tüm araştırmalar: maliyet, %20 marj için fiyat, Trendyol medyanı, fiyat uyumu; ürün çekmecesi (skor, fiyat bandı, pazar, riskler), favori / reddet / projeye çevir / yeniden puanla |
+| Günlük tarama | zamanlanmış görev durumu, kelime listesi düzenleme, günlük raporlar |
+| Projeler | aşamaya göre pano; proje sayfasında 11 adım (çalıştır, onayla, rapor, görsel, mağaza önizleme), kâr, reklam performansı (CPA/ROAS/huni), içerik takvimi, haftalık finans |
+| Kâr hesaplayıcı | fiyat / indirim / kanal / iade / reklam payı → net kâr, marj, başabaş ROAS, hedef CPA, test bütçesi, paket teklifi |
+| Ayarlar | bağlantılar (sadece bağlı mı), Apify harcaması, hesaplama varsayımları |
+
+Panel komutları mevcut CLI'lar üzerinden çalıştırır. Shopify/Meta gönderimi (`--gonder`) panelde yoktur.
+
+## Günlük tarama
+
+Windows Görev Zamanlayıcı her gün 09:00'da `urun-arastirma/gunluk_calistir.cmd` çalıştırır (bilgisayar kapalıysa açılınca):
+`gunluk-kelimeler.txt`'den sıradaki kelime → AliExpress (alakasız sonuçlar elenir) → Trendyol (aylık 3 $ tavanı) → en iyi 3 ürün
+20 puanla değerlendirilir → `cikti/gunluk/<tarih>.md` ve birikimli `adaylar.md`. CAPTCHA çıkarsa durur, atlatmaz.
+
+## Kullanım (terminal)
 
 ```bash
 cd eticaret
