@@ -62,18 +62,23 @@ def oku(yol: Path) -> list[dict]:
 
 def degerlendir(s: dict, kural: dict, saat: float) -> tuple[str, str]:
     h, atc, satis = s.get("harcama", 0), s.get("atc", 0), s.get("satis", 0)
-    roas = s["roas"]
+    roas, cpa = s["roas"], s.get("cpa")
     be = kural.get("basabas_roas") or 99
+    hedef = kural.get("hedef_cpa_tl")
+    yuksek = kural.get("kapat_yuksek_cpa_tl") or (2 * hedef if hedef else None)
     if kural.get("kapat_0_atc_tl") and h >= kural["kapat_0_atc_tl"] and atc == 0:
         return "KAPAT", f"{tl(h)} harcadı, 0 sepete ekleme (kural 1)"
     if kural.get("kapat_0_satis_tl") and h >= kural["kapat_0_satis_tl"] and satis == 0:
-        return "KAPAT", f"{tl(h)} harcadı, 0 satış (kural 2)"
+        return "KAPAT", f"{tl(h)} harcadı (≥ 2 × hedef CPA), 0 satış (kural 2)"
     if saat >= 48 and roas < be:
         return "KAPAT", f"48 saat geçti, ROAS {roas:.2f} < başabaş {be} (kural 3)"
-    if saat >= 48 and satis >= 2 and roas >= be * 1.2:
-        return "ÖLÇEKLE", f"ROAS {roas:.2f} ≥ başabaşın 1,2 katı; bütçeyi %15–20 artır (24–48 saatte bir)"
+    if yuksek and satis >= 3 and cpa and cpa >= yuksek:
+        return "KAPAT", f"{satis:.0f} satışta CPA {tl(cpa)} ≥ 2 × hedef CPA ({tl(yuksek)}); kapat veya kreatifi değiştir (kural 4)"
+    if saat >= 48 and satis >= 2 and roas >= be and (cpa is not None and hedef and cpa <= hedef):
+        return "ÖLÇEKLE", f"CPA {tl(cpa)} ≤ hedef {tl(hedef)}, ROAS {roas:.2f}; bütçeyi %10–20 artır (24–48 saatte bir)"
     if roas >= be and satis >= 1:
-        return "İZLE (iyi)", f"ROAS {roas:.2f} ≥ başabaş; 48 saati ve en az 2 satışı bekle"
+        ek = f", CPA {tl(cpa)} hedefin ({tl(hedef)}) üstünde → henüz ölçekleme" if hedef and cpa and cpa > hedef else ""
+        return "İZLE (iyi)", f"ROAS {roas:.2f} ≥ başabaş{ek}; 48 saati ve en az 2 satışı bekle"
     return "İZLE", "henüz karar için yeterli veri yok"
 
 
@@ -127,9 +132,9 @@ def calistir(p: Proje, args=None):
     md += ["", "## Sonraki adım", ""]
     if len(kazanan) >= 2:
         md.append(f"- {len(kazanan)} kazanan set var → en iyi 3–4 reklamla **CBO (Advantage kampanya bütçesi)** kampanyası aç; "
-                  "kazanan ABO setlerini %15–20 artırarak sürdür.")
+                  "kazanan ABO setlerini %10–20 artırarak sürdür.")
     elif kazanan:
-        md.append("- 1 kazanan: bütçesini 24–48 saatte bir %15–20 artır; kapanan setlerin yerine kazanan açıdan yeni hook'larla set aç.")
+        md.append("- 1 kazanan: bütçesini 24–48 saatte bir %10–20 artır; kapanan setlerin yerine kazanan açıdan yeni hook'larla set aç.")
     else:
         md.append("- Kazanan yok: kapatılan setlerin yerine kreatif adımından yeni açılar dene; CTR düşükse hook, ATC yoksa ürün sayfası/teklif.")
     p.yaz("analiz", {"saat": saat, "kurallar": kural, "setler": setler, "toplam": top, "kaynak": str(kaynak)}, md)

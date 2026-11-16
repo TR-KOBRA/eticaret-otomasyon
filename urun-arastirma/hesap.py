@@ -122,9 +122,13 @@ def fiyat_analizi(satis_fiyati: float, maliyet: dict | float, a: dict | None = N
         # Başabaş: reklama harcanabilecek en fazla tutar = reklam öncesi kâr
         "basabas_roas": round(1 / ro_marj, 2) if ro_marj > 0 else None,
         "basabas_cpa": round(reklam_oncesi_kar, 2) if reklam_oncesi_kar > 0 else None,
-        # Modül 6 kapatma kuralları
+        # Hedef CPA = sipariş başına planlanan reklam payı (bu CPA'da net marj hedefi tutar).
+        # Başabaş CPA ise reklama harcanabilecek en fazla tutardır; hedef olarak kullanılmaz.
+        "hedef_cpa": round(reklam, 2) if reklam > 0 else None,
+        # Kapatma kuralları (Modül 6 + İleri Seviye Reklamcılık 13/16)
         "kapat_0_atc_harcama": round(net_kar, 2) if net_kar > 0 else None,
-        "kapat_0_satis_harcama": round(1.5 * reklam_oncesi_kar, 2) if reklam_oncesi_kar > 0 else None,
+        "kapat_0_satis_harcama": round(2 * reklam, 2) if reklam > 0 and reklam_oncesi_kar > 0 else None,
+        "kapat_yuksek_cpa": round(2 * reklam, 2) if reklam > 0 and reklam_oncesi_kar > 0 else None,
     }
 
 

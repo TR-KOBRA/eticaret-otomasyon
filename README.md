@@ -11,7 +11,7 @@ AliExpress ürününden Türkiye'de satışa kadar 11 adım. Adım 1 `urun-arast
 6 magaza     Shopify CSV + index.html önizleme (+ --gonder ile Shopify'da TASLAK ürün)
 7 instagram  profil/bio, 4 öne çıkan kapağı, 24 içerik (12 reels / 7 carousel / 5 görsel) CSV
 8 kreatif    4 açı × 3 hook, başlık, CTA, 3 ton metin, 3 UGC senaryosu  ⏸ onay
-9 reklam     ABO + broad TR test planı, kapatma eşikleri (+ --gonder ile Meta'da DURAKLATILMIŞ kampanya)
+9 reklam     ABO + broad TR test planı (günlük = 3 × hedef CPA), kapatma eşikleri (+ --gonder ile Meta'da DURAKLATILMIŞ kampanya)
 10 analiz    Reklam Yöneticisi CSV'si → kapat / izle / ölçekle + huni teşhisi
 11 operasyon müşteri mesajları, stok eşiği, haftalık net kâr tablosu
 ```
@@ -25,7 +25,7 @@ python hat.py yeni urun-arastirma/cikti/urun-<id>-<zaman>.json --ad urunadi
 python hat.py calistir urunadi              # ön koşulu sağlanan tüm adımlar
 python hat.py durum urunadi
 python hat.py onayla urunadi marka --secim isim=Esenra
-python hat.py sec urunadi fiyat=749 set_butce=150
+python hat.py sec urunadi fiyat=749 gunluk_butce=450   # isteğe bağlı: set_butce, set_sayisi
 python hat.py calistir urunadi analiz --csv meta-rapor.csv
 ```
 

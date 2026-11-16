@@ -10,9 +10,9 @@ kaydet, `calistir(p: Proje, args)` yaz, `p.yaz(adim, veri, md)` ile çıktı ver
 - `arastirma.md` — 8 kriter, 20 puanlık skor kartı (15+ teste al), viral 5 soru, rekabet analizi
 - `fiyat-kar.md` — kâr formülü, hedef net marj ≥ %20, iade %15–30, başabaş ROAS/CPA, sermaye/nakit
 - `tedarik.md` — 15 tedarikçi sorusu, sahte toptancı işaretleri
-- `magaza.md` — mağaza 6 adım, ürün sayfası, güven unsurları, yasal sayfalar (KVKK, mesafeli satış, ETBİS)
+- `magaza.md` — mağaza 6 adım, ürün sayfası, güven unsurları, yasal sayfalar (KVKK, mesafeli satış, ETBİS); Shopify yayın öncesi kontrol, upsell/bundle, indirim-katkı, ücretsiz kargo eşiği, dönüşüm hunisi
 - `instagram.md` — bio formülü, 4 öne çıkan, %50 reels / %30 carousel / %20 görsel, 20–30 içerik şartı
-- `reklam.md` — ABO + broad, set başı 100–150 TL, metrik eşikleri, 3 kapatma kuralı, %15–20 ölçekleme
+- `reklam.md` — ABO + broad, günlük ≈ 3 × hedef CPA (kodda `reklam.butce_hesapla`), metrik eşikleri, 4 kapatma kuralı (hedef CPA'ya göre), %10–20 ölçekleme; Pixel/CAPI/Purchase testi, bütçe = hedef CPA × 3, retargeting, Lookalike, CBO/ABO
 - `akis.md` — eksik listesi ve uçtan uca akış planı
 Yeni doküman gelirse: `kaynaklar/gelen/`e konur → metni çıkar → ilgili özet dosyasını güncelle → `00-indeks.md`ye satır ekle.
 
