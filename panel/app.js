@@ -174,7 +174,8 @@ function adayTablo(l, kisa = false) {
     <th class="sayi">Piyasa medyanı</th><th>Fiyat uyumu</th>${kisa ? "" : "<th>Risk</th><th>Tarih</th>"}<th></th></tr></thead><tbody>
   ${l.map(a => {
     const u = uyum(a);
-    const uy = u == null ? `<span class="rozet r-gri">Rakip verisi yok</span>` : u <= 1 ? `<span class="rozet r-ok">Piyasaya uygun</span>`
+    const uy = a.benzer_yok ? `<span class="rozet r-info" title="Trendyol aramasında aynı tür ürün bulunamadı; fiyat piyasayla doğrulanamadı">Piyasada aynısı yok</span>`
+      : u == null ? `<span class="rozet r-gri">Rakip verisi yok</span>` : u <= 1 ? `<span class="rozet r-ok">Piyasaya uygun</span>`
       : `<span class="rozet ${u <= 1.3 ? "r-warn" : "r-bad"}">Piyasanın ${yuzde((u - 1) * 100, 0)} üstü</span>`;
     return `<tr onclick="adayAc('${esc(a.json)}')">
       <td><div class="urun-h"><img src="${esc(a.gorsel || "")}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"><div style="min-width:0">
@@ -249,12 +250,15 @@ function adayFiyat(a) {
   let bant = "";
   if (rk.medyan) {
     const ust = Math.max(rk.max, a.min_fiyat || 0) * 1.05, x = v => Math.max(0, Math.min(100, v / ust * 100));
-    bant = `<div class="kart-ic" style="padding:0"><h4 style="margin:18px 0 0">Trendyol fiyat aralığı (${rk.urun_sayisi} ürün)</h4>
+    bant = `<div class="kart-ic" style="padding:0"><h4 style="margin:18px 0 0">Trendyol fiyat aralığı (${rk.kapsam || rk.urun_sayisi + " ürün"})</h4>
       <div class="bant"><div class="serit"></div><div class="ceyrek" style="left:${x(rk.alt_ceyrek)}%;width:${x(rk.ust_ceyrek) - x(rk.alt_ceyrek)}%"></div>
         <div class="im" style="left:${x(rk.medyan)}%"><span style="${etk(x(rk.medyan))}">medyan ${tl(rk.medyan)}</span></div>
         ${a.min_fiyat ? `<div class="im biz" style="left:${x(a.min_fiyat)}%"><span style="${etk(x(a.min_fiyat))}">bizim min. ${tl(a.min_fiyat)}</span></div>` : ""}
         <span class="uc" style="left:0">${tl(rk.min)}</span><span class="uc" style="right:0">${tl(rk.max)}</span></div>
       <div class="k muted" style="margin-top:22px">Mavi alan rakiplerin ortadaki yarısı (alt–üst çeyrek). Turuncu çizgi %20 net marj için en düşük fiyatımız.</div></div>`;
+  } else if (a.benzer_yok) {
+    bant = `<div class="not bilgi" style="margin-top:16px"><b>Trendyol'da aynı ürün bulunamadı</b>Aramadaki ürünler başka türden (ör. yedek rulo, aksesuar);
+      fiyat kıyası yapılmadı. Bu bir pazar boşluğu da olabilir, talep olmadığı da: Trends ve Instagram'da talebi kontrol et.</div>`;
   }
   return `<div class="izgara g2">
     <div><h4 style="margin:0 0 6px">Birim maliyet (stoklu)</h4>${Object.entries(k).map(([a2, v]) => `<div class="liste-li"><span class="ara">${KAL[a2] || a2}</span><b class="say">${tl(v, 2)}</b></div>`).join("")}
@@ -585,7 +589,10 @@ function ayarModal() {
   const s = PROJE.secimler;
   const alan = (k, ad, ipucu) => `<div class="alan"><label class="e">${ad}</label><input data-k="${k}" value="${esc(s[k] ?? "")}" placeholder="${esc(ipucu)}"></div>`;
   const m = modal(`<h3>Proje ayarları</h3><p class="k muted" style="margin-top:0">Boş bırakılan alan otomatik hesaplanır. Değiştirdikten sonra ilgili adımı yeniden üret.</p>
+    <div class="not bilgi" style="margin-bottom:12px"><b>Tedarikçi toptan fiyatı</b>Satıcı adet başı fiyat verince buraya gir; maliyet, fiyat ve reklam eşikleri yeniden hesaplanır.</div>
+    <div class="izgara g2" style="gap:12px">${alan("tedarik_fiyati", "Toptan ürün fiyatı (TL/adet)", "boş: AliExpress tek adet fiyatı")}${alan("tedarik_kargo", "Uluslararası kargo (TL/adet)", "0")}</div>
     ${alan("fiyat", "Satış fiyatı (TL)", "otomatik: " + tl(PROJE.fiyat.fiyat))}
+    <div class="izgara g2" style="gap:12px">${alan("kargo_esigi", "Ücretsiz kargo eşiği (TL)", "ör. 750")}${alan("hazirlik_gun", "Kargoya verme süresi (iş günü)", "ör. 2")}</div>
     <div class="izgara g2" style="gap:12px">${alan("gunluk_butce", "Günlük reklam bütçesi (TL)", "otomatik: 3 × hedef CPA")}${alan("set_sayisi", "Reklam seti sayısı", "otomatik: 1–4")}</div>
     <div class="izgara g2" style="gap:12px">${alan("yas_min", "En küçük yaş", "22")}${alan("yas_max", "En büyük yaş", "55")}</div>
     <div class="flex" style="margin-top:8px;justify-content:flex-end"><button class="btn" data-kapat>Vazgeç</button><button class="btn ana" id="sB">Kaydet</button></div>`);

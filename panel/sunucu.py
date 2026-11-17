@@ -153,6 +153,7 @@ def _aday_ozeti(j: Path, v: dict) -> dict:
         "min_fiyat": (mn or {}).get("fiyat"), "piyasa_fiyat": (piyasa or {}).get("fiyat") if rk.get("medyan") else None,
         "piyasa_marj": (piyasa or {}).get("marj_yuzde") if rk.get("medyan") else None, "rakip_medyan": rk.get("medyan"),
         "rakip_sayisi": rk.get("urun_sayisi"), "satis": u.get("satis"), "puan_ae": u.get("puan"),
+        "benzer_yok": bool((v.get("trendyol") or {}).get("benzer_yok")), "benzer_sayisi": (v.get("trendyol") or {}).get("benzer_sayisi"),
         "yuksek_risk": sum(1 for r in riskler if r.get("seviye") == "yuksek"),
         "kargo_riski": (v.get("kargo_riski") or {}).get("seviye"), "iade_orani": (v.get("iade") or {}).get("oran"),
         "ayrisma": an.get("ayrisma_puani"),
@@ -409,7 +410,7 @@ def onay_geri(ad: str, istek: OnayIstek):
     return {"tamam": True}
 
 
-SECILEBILIR = {"fiyat", "gunluk_butce", "set_butce", "set_sayisi", "yas_min", "yas_max", "test_saat"}
+SECILEBILIR = {"fiyat", "gunluk_butce", "set_butce", "set_sayisi", "yas_min", "yas_max", "test_saat", "tedarik_fiyati", "tedarik_kargo", "kargo_esigi", "hazirlik_gun"}
 
 
 @app.post("/api/proje/{ad}/sec")
@@ -617,7 +618,7 @@ def hesapla(h: HesapIstek):
         v = _json(_guvenli(CIKTI, h.json)) or {}
         maliyet = (v.get("maliyet") or {}).get("stok")
     if h.proje:
-        maliyet = (_proje(h.proje).veri.get("maliyet") or {}).get("stok")
+        maliyet = _proje(h.proje).maliyet()
     if h.maliyet is not None and h.maliyet >= 0:
         k = dict((maliyet or {}).get("kalemler") or {"yurtici_kargo": hesap.AYARLAR["yurtici_kargo_tl"], "paketleme": hesap.AYARLAR["paketleme_tl"]})
         maliyet = {"toplam": h.maliyet, "kalemler": k}

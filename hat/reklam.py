@@ -34,7 +34,8 @@ def butce_hesapla(hedef_cpa, aci_sayisi: int, gunluk=None, set_butce=None, set_s
         n = max(1, min(int(set_sayisi), aci_sayisi))
     else:
         n = max(1, min(ust, int(toplam // min_set)))
-    sb = round(float(set_butce), 2) if set_butce else round(max(min_set, toplam / n), 2)
+    # Elle girilmediyse 5 TL'ye yukarı yuvarla (Reklam Yöneticisi'nde 179,85 yerine 180)
+    sb = round(float(set_butce), 2) if set_butce else float(-(-max(min_set, toplam / n) // 5) * 5)
     if hedef_cpa and sb * 5 < 2 * hedef_cpa:
         uyarilar.append(f"Set başı {tl(sb)} ile 5 günde {tl(sb * 5)} harcanır; '0 satış → kapat' eşiği {tl(2 * hedef_cpa)}. "
                         "Kural test süresinde çalışmaz: set sayısını azalt ya da set bütçesini artır.")
@@ -141,8 +142,10 @@ def calistir(p: Proje, args=None):
           "(100 TL ve 0,4 × hedef CPA'dan büyüğü); bütçe yetmezse daha az set. Değiştirmek için: `python hat.py sec <proje> gunluk_butce=...`",
           f"- Meta API: {api['durum']}" + (f" — {api.get('neden')}" if api.get("neden") else ""), ""]
     md += [f"> ⚠ {u}" for u in b.get("uyarilar") or []] + ([""] if b.get("uyarilar") else [])
-    md += ["## Ön koşullar (hepsi ✓ olmadan yayına alma)", ""] + [f"- [ ] {x}" for x in [
-        "Numune onaylandı (tedarik adımı)", "Mağaza yayında, telefonda test siparişi verildi, ödeme ve kargo çalışıyor",
+    md += ["## Ön koşullar (hepsi ✓ olmadan yayına alma)", "",
+           f"- [{'x' if p.onayli('tedarik') else ' '}] Numune onaylandı (tedarik adımı)"
+           + (" (deneme projesi)" if p.durum.get("zorla") else "")] + [f"- [ ] {x}" for x in [
+        "Mağaza yayında, telefonda test siparişi verildi, ödeme ve kargo çalışıyor",
         "Meta Pixel + Conversions API kurulu; PageView / ViewContent / AddToCart / InitiateCheckout / Purchase olayları geliyor",
         "Instagram'da en az 20 içerik, 4 öne çıkan, bio ve link hazır", "Yasal sayfalar ve iletişim bilgileri sitede",
         "Reklamlar gerçek ürün görüntüsüyle (numune çekimi/UGC); yanıltıcı AI görseli yok"]]

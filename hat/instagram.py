@@ -36,9 +36,26 @@ def kapak(metin: str, renk: str, zemin: str, hedef):
     img = Image.new("RGB", (1080, 1920), zemin or "#FFFFFF")
     d = ImageDraw.Draw(img)
     d.ellipse((240, 660, 840, 1260), fill=renk or "#222222")
-    f = _font(84)
-    x0, y0, x1, y1 = d.textbbox((0, 0), metin, font=f)
-    d.text((540 - (x1 - x0) / 2 - x0, 960 - (y1 - y0) / 2 - y0), metin, font=f, fill=zemin or "#FFFFFF")
+    # Tam başlık (ör. "Sizden Gelenler"): daire içine sığana kadar küçült, gerekirse iki satıra böl
+    satirlar = [metin]
+    for boyut in (84, 76, 68, 60, 54):
+        f = _font(boyut)
+        genis = lambda t: d.textbbox((0, 0), t, font=f)[2] - d.textbbox((0, 0), t, font=f)[0]
+        if genis(metin) <= 500:
+            satirlar = [metin]
+            break
+        k = metin.split()
+        if len(k) > 1:
+            orta = max(range(1, len(k)), key=lambda i: -abs(len(" ".join(k[:i])) - len(" ".join(k[i:]))))
+            iki = [" ".join(k[:orta]), " ".join(k[orta:])]
+            if max(genis(t) for t in iki) <= 470:
+                satirlar = iki
+                break
+    yuk = boyut * 1.15
+    for i, t in enumerate(satirlar):
+        x0, y0, x1, y1 = d.textbbox((0, 0), t, font=f)
+        y = 960 - yuk * len(satirlar) / 2 + i * yuk + (yuk - (y1 - y0)) / 2 - y0
+        d.text((540 - (x1 - x0) / 2 - x0, y), t, font=f, fill=zemin or "#FFFFFF")
     img.save(hedef)
 
 
@@ -61,7 +78,7 @@ def calistir(p: Proje, args=None):
     kl = p.yol / "instagram"
     kl.mkdir(exist_ok=True)
     for i, o in enumerate(g["one_cikanlar"][:4], 1):
-        kapak(o["ad"].split()[0][:10], m.get("ana_renk"), m.get("notr_renk"), kl / f"one-cikan-{i}.png")
+        kapak(o["ad"][:24], m.get("ana_renk"), m.get("notr_renk"), kl / f"one-cikan-{i}.png")
     with open(kl / "icerik-takvimi.csv", "w", newline="", encoding="utf-8-sig") as fh:
         w = csv.writer(fh, delimiter=";")
         w.writerow(["sira", "tur", "baslik", "kanca", "akis", "cta", "caption", "hashtagler", "gorsel_kaynagi", "durum"])

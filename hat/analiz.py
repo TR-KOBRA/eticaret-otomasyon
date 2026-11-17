@@ -77,8 +77,13 @@ def degerlendir(s: dict, kural: dict, saat: float) -> tuple[str, str]:
     if saat >= 48 and satis >= 2 and roas >= be and (cpa is not None and hedef and cpa <= hedef):
         return "ÖLÇEKLE", f"CPA {tl(cpa)} ≤ hedef {tl(hedef)}, ROAS {roas:.2f}; bütçeyi %10–20 artır (24–48 saatte bir)"
     if roas >= be and satis >= 1:
-        ek = f", CPA {tl(cpa)} hedefin ({tl(hedef)}) üstünde → henüz ölçekleme" if hedef and cpa and cpa > hedef else ""
-        return "İZLE (iyi)", f"ROAS {roas:.2f} ≥ başabaş{ek}; 48 saati ve en az 2 satışı bekle"
+        if hedef and cpa and cpa > hedef:
+            if saat >= 48 and satis >= 2:
+                return "İZLE (iyi)", (f"ROAS {roas:.2f} ≥ başabaş ama CPA {tl(cpa)} hedefin ({tl(hedef)}) üstünde → ölçekleme yok; "
+                                      "kârda olduğu için açık kalsın, yeni hook / teklifle CPA'yı düşürmeyi dene")
+            return "İZLE (iyi)", (f"ROAS {roas:.2f} ≥ başabaş, CPA {tl(cpa)} hedefin ({tl(hedef)}) üstünde → henüz ölçekleme; "
+                                  "48 saati ve en az 2 satışı bekle")
+        return "İZLE (iyi)", f"ROAS {roas:.2f} ≥ başabaş; 48 saati ve en az 2 satışı bekle"
     return "İZLE", "henüz karar için yeterli veri yok"
 
 
@@ -103,6 +108,7 @@ def calistir(p: Proje, args=None):
     kural = (rk.get("plan") or {}).get("kurallar") or {}
     bas = p.secim("test_baslangic")
     saat = (dt.datetime.now() - dt.datetime.fromisoformat(bas)).total_seconds() / 3600 if bas else 0
+    saat = max(0.0, saat)            # planlanan başlangıç henüz gelmediyse eksi süre gösterme
     if p.secim("test_saat"):
         saat = float(p.secim("test_saat"))
     setler = oku(Path(kaynak))
@@ -124,11 +130,11 @@ def calistir(p: Proje, args=None):
           "| Set | Harcama | CTR | CPC | ATC | Satış | CPA | ROAS | Karar | Neden |", "|---|---|---|---|---|---|---|---|---|---|"]
     for s in setler:
         ctr = "-" if s["ctr"] is None else f"%{s['ctr']:.2f}"
-        md.append(f"| {s['ad']} | {tl(s.get('harcama'))} | {ctr} | "
+        md.append(f"| {s['ad'].replace('|', '·')} | {tl(s.get('harcama'))} | {ctr} | "
                   f"{tl(s['cpc'])} | {s.get('atc', 0):.0f} | {s.get('satis', 0):.0f} | {tl(s['cpa'])} | {s['roas']:.2f} | "
                   f"**{s['karar']}** | {s['neden']} |")
     md += ["", "## Teşhis", ""]
-    md += [f"- **{s['ad']}:** " + "; ".join(s["teshis"]) for s in setler if s["teshis"]] or ["- Belirgin huni sorunu yok."]
+    md += [f"- **{s['ad'].replace('|', '·')}:** " + "; ".join(s["teshis"]) for s in setler if s["teshis"]] or ["- Belirgin huni sorunu yok."]
     md += ["", "## Sonraki adım", ""]
     if len(kazanan) >= 2:
         md.append(f"- {len(kazanan)} kazanan set var → en iyi 3–4 reklamla **CBO (Advantage kampanya bütçesi)** kampanyası aç; "

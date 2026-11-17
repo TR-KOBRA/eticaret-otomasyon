@@ -109,13 +109,32 @@ def calistir(p: Proje, args=None):
         "SEO başlık/meta/url/etiketler, tekli/2'li/3'lü paket için birer kısa satış cümlesi.",
         "", "Bilgi bankası (mağaza kuralları):", ozet("magaza")[:2500],
     ])
+    istem += ("\nTürkçe ekleri kesme işaretiyle yaz (3'ü 1 arada, iPhone'a). Kargo süresi ve ücretsiz kargo eşiği "
+              "sorularında rakam uydurma, [X] bırak.")
     g = metin_json(istem, SEMA, sicaklik=0.6)
     import re
     g["kullanim"] = [re.sub(r"^\s*\d+[.)]\s*", "", x) for x in g["kullanim"]]
+    # Model sayı eklerindeki kesme işaretini düşürebiliyor: "3ü1 Arada" / "3ü 1 Arada" → "3'ü 1 Arada"
+    for k in ("urun_adi", "seo_baslik", "alt_baslik", "meta_aciklama"):
+        if isinstance(g.get(k), str):
+            g[k] = re.sub(r"\b(\d)(ü|u|ı|i)\s?(\d)\s(Arada|arada)", r"\1'\2 \3 \4", g[k])
     oz = p.urun.get("ozellikler") or {}
     g["ozellik_tablosu"] = {k: v for k, v in oz.items() if "marka" not in k.lower() and "brand" not in k.lower()}
-    g["guven_seridi"] = GUVEN_SERIDI
-    g["yasal"] = {k: v.replace("{marka}", m["isim"]) for k, v in YASAL.items()}
+    # Mağaza bilgileri (proje seçimleri) [X] yer tutucularını doldurur: kargo_esigi (TL), hazirlik_gun (iş günü)
+    esik, gun_ = p.secim("kargo_esigi"), p.secim("hazirlik_gun")
+
+    def doldur(t: str) -> str:
+        # Cayma hakkı yasal olarak 14 gün (Mesafeli Sözleşmeler Yönetmeliği): iade bağlamındaki "[X] gün" boş kalmasın
+        t = re.sub(r"\[X\](\s?gün)(?=[^.]{0,60}(iade|cayma))", r"14\1", t)
+        if esik:
+            t = re.sub(r"\[X\]( ?TL)", lambda _m: f"{float(esik):,.0f}".replace(",", ".") + _m.group(1), t)
+        if gun_:
+            # sadece "kargoya verme" süresi; teslimat (yolda geçen) süresi ayrı bilgidir, [X] kalır
+            t = re.sub(r"\[X\]( ?iş günü)(?=[^.]{0,50}kargo(ya|ya teslim))", lambda _m: f"{gun_}{_m.group(1)}", t)
+        return t
+    g["guven_seridi"] = [doldur(x) for x in GUVEN_SERIDI]
+    g["sss"] = [{**x, "soru": doldur(x["soru"]), "cevap": doldur(x["cevap"])} for x in g["sss"]]
+    g["yasal"] = {k: doldur(v.replace("{marka}", m["isim"])) for k, v in YASAL.items()}
     g["yasal_kontrol"] = KONTROL
     g["fiyat"] = p.fiyat()
 
@@ -136,11 +155,17 @@ def calistir(p: Proje, args=None):
     md += [f"| {k} | {v} |" for k, v in g["ozellik_tablosu"].items()]
     md += ["", "## Paketler", "", f"- Tekli: {g['paket_metinleri']['tekli']}", f"- 2'li: {g['paket_metinleri']['ikili']}",
            f"- 3'lü: {g['paket_metinleri']['uclu']}"]
-    md += ["", "## Güven şeridi", ""] + [f"- {x}" for x in GUVEN_SERIDI]
+    md += ["", "## Güven şeridi", ""] + [f"- {x}" for x in g["guven_seridi"]]
     md += ["", "## SSS", ""] + [f"**{x['soru']}**  \n{x['cevap']}\n" for x in g["sss"]]
     md += ["## SEO", "", f"- Başlık: {g['seo_baslik']}", f"- Meta: {g['meta_aciklama']}", f"- URL: /{g['url']}",
            "- Etiketler: " + ", ".join(g["etiketler"])]
     md += ["", "## Yasal sayfalar (şablon, `yasal/` klasöründe)", "",
            "Köşeli parantezli alanları doldur ve **yayından önce hukukçu / mali müşavire kontrol ettir.**", ""]
     md += [f"- {k}.md" for k in g["yasal"]] + ["", "## Yasal kontrol listesi", ""] + [f"- [ ] {x}" for x in KONTROL]
+    tum = "\n".join(md)
+    bos = tum.count("[X]") + tum.count("[doğrula]")
+    if bos:
+        md[4:4] = [f"> ⚠ Yayından önce doldurulacak {bos} yer var ([X] / [doğrula]). Kargo eşiği ve hazırlık süresi için: "
+                   f"`python hat.py sec {p.ad} kargo_esigi=750 hazirlik_gun=2` (panel → Ayarlar), sonra içeriği yeniden üret.", ""]
+    g["doldurulacak"] = bos
     p.yaz("icerik", g, md)

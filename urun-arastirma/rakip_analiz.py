@@ -6,6 +6,7 @@ Yorumlardan tekrar eden şikâyet/beğenileri çıkarır, farklılaşma önerisi
 from __future__ import annotations
 
 import gemini
+import rakipler
 
 SISTEM = (
     "Türkiye pazarında e-ticaret yapan birine ürün araştırmasında yardım eden analistsin. "
@@ -36,8 +37,11 @@ SEMA = {
             "soru": {"type": "STRING"}, "cevap_taslagi": {"type": "STRING"}}, "required": ["soru", "cevap_taslagi"]}},
         "ayrisma_puani": {"type": "INTEGER", "description": "0: ayrışmak zor, 1: kısmen, 2: net ayrışma fırsatı var"},
         "ayrisma_gerekce": {"type": "STRING"},
+        "benzer_rakipler": {"type": "ARRAY", "items": {"type": "INTEGER"},
+                            "description": "Numaralı Trendyol listesinden bizim ürünle AYNI tür ve işlevdeki ürünlerin numaraları"},
     },
-    "required": ["sikayetler", "begeniler", "farklilasma", "neden_benden", "sss", "ayrisma_puani", "ayrisma_gerekce"],
+    "required": ["sikayetler", "begeniler", "farklilasma", "neden_benden", "sss", "ayrisma_puani", "ayrisma_gerekce",
+                 "benzer_rakipler"],
 }
 
 
@@ -76,14 +80,22 @@ def analiz(u: dict, rk: dict | None) -> dict:
     ]
     satirlar += [f"- {t['ad']} | {t['fiyat']} TL | {t['puan']}★ | {t['degerlendirme']} değerlendirme | "
                  f"ücretsiz kargo: {t['ucretsiz_kargo']}" for t in tablo] or ["- (rakip verisi yok)"]
+    liste = rakipler.numarali_liste(rk) if rk and not rk.get("hata") else []
+    if liste:
+        satirlar += ["", "Numaralı Trendyol arama sonuçları (benzer rakip seçimi için):"]
+        satirlar += [f"{i}. {x.get('ad')} | {x.get('fiyat')} TL" for i, x in enumerate(liste, 1)]
     satirlar += ["", f"Yorumlar ({len(yorumlar)} adet):"] + (yorumlar[:120] or ["(yorum yok)"])
     satirlar += ["", "Görev: tekrar eden en fazla 3 şikâyet (her biri için ürünü satarken nasıl fırsata çevrileceği), "
                  "en fazla 3 beğeni, 5 boyutta farklılaşma önerisi (ürün, teklif, içerik, deneyim, problem çözümü; "
                  "her boyuttan en fazla 1), tek cümlelik 'neden benden alınır', yorumlardaki itirazlardan 4–6 SSS, "
-                 "ve rakiplerden ayrışabilme puanı (0/1/2) gerekçesiyle. Yorum yoksa şikâyet/beğeni listesi boş olsun."]
+                 "ve rakiplerden ayrışabilme puanı (0/1/2) gerekçesiyle. Yorum yoksa şikâyet/beğeni listesi boş olsun. "
+                 "benzer_rakipler: numaralı Trendyol listesinden bizim ürünle AYNI ürün türü ve işlevde olanların numaraları "
+                 "(ör. çok işlevli bakım fırçası ile yapışkan tüy rulosu yedeği aynı ürün DEĞİLDİR; set/paket olsa da ana ürün aynıysa dahil). "
+                 "Aynısı yoksa boş liste."]
     try:
         g = gemini.json_sor("\n".join(satirlar), SEMA, sistem=SISTEM)
     except Exception as e:
         return {**sonuc, "hata": f"Gemini: {e}"}
     g["ayrisma_puani"] = max(0, min(2, int(g.get("ayrisma_puani") or 0)))
-    return {**sonuc, **g, "model": gemini.model()}
+    g["benzer_rakipler"] = [int(i) for i in g.get("benzer_rakipler") or [] if 1 <= int(i) <= len(liste)]
+    return {**sonuc, **g, "model": gemini.son_model() or gemini.model()}

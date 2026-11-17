@@ -52,13 +52,20 @@ KURALLAR = (
     "Sahte yorum, sahte sayaç, sahte stok aciliyeti üretme. "
     "'Farklılaşma' ve 'neden benden alınır' maddeleri henüz yapılmamış PLANLARDIR: bunları kutu içeriği, aksesuar, ambalaj "
     "ya da ürün özelliği olarak mevcutmuş gibi yazma. 'Güvenli', 'zararsız', 'doğal', 'saf' gibi güvenlik/sağlık çağrışımlı "
-    "nitelemeleri sertifika belgesi görülmeden kullanma."
+    "nitelemeleri sertifika belgesi görülmeden kullanma. "
+    "Kesin sonuç vaat etme: 'tüm/bütün tüyler', 'tamamen', 'anında', 'tek hareketle', 'iz bırakmaz', 'sonsuza kadar' yerine "
+    "ölçülü ifade kullan (ör. 'tüyleri kolayca toplar'). Türkçe ekleri kesme işaretiyle yaz (3'ü 1 arada)."
 )
 
 
 def slug(s: str) -> str:
     tr = str.maketrans("çğıöşüÇĞİÖŞÜ", "cgiosuCGIOSU")
     return re.sub(r"[^a-z0-9]+", "-", s.translate(tr).lower()).strip("-")[:40]
+
+
+def tr_upper(s: str) -> str:
+    """Türkçe büyük harf: i → İ, ı → I (str.upper() 'i'yi noktasız 'I' yapar)."""
+    return s.replace("i", "İ").replace("ı", "I").upper()
 
 
 def tl(x) -> str:
@@ -102,6 +109,14 @@ class Proje:
         return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
 
     def yaz(self, adim: str, veri: dict, md: list[str] | str):
+        if adim in ("icerik", "instagram", "kreatif", "marka"):      # yapay zekâ metni: kesin sonuç vaadi kaldıysa uyar
+            bul = abarti_tara({k: v for k, v in veri.items() if k not in ("yasal", "yasal_kontrol", "fiyat")})
+            veri["abarti_uyarilari"] = bul
+            if bul:
+                satir = (["> ⚠ **Abartı / kesin sonuç vaadi bulundu (reklam reddi ve tüketici şikâyeti riski) — yayından önce düzelt:**"]
+                         + [f"> - {x}" for x in bul[:12]] + [""])
+                md = (md.split("\n") if isinstance(md, str) else list(md))
+                md[2:2] = satir
         self.dosya(adim).write_text(json.dumps(veri, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
         self.dosya(adim, "md").write_text(md if isinstance(md, str) else "\n".join(md), encoding="utf-8")
         a = self.durum["adimlar"].setdefault(adim, {})
@@ -124,15 +139,32 @@ class Proje:
         sec = next((x for x in m.get("isimler", []) if x["isim"].lower() == (isim or "").lower()), None)
         return {**(m.get("kimlik") or {}), "isim": isim or (sec or {}).get("isim") or "[MARKA]", "secilen": sec}
 
+    def maliyet(self) -> dict:
+        """Birim maliyet (stoklu). Tedarikçiden toptan fiyat geldiyse (secim tedarik_fiyati = adet başı ürün TL,
+        isteğe bağlı tedarik_kargo = adet başı uluslararası kargo TL) araştırmadaki tek adet AliExpress fiyatının yerine geçer."""
+        import hesap
+        m = self.veri["maliyet"]["stok"]
+        tf = self.secim("tedarik_fiyati")
+        if not tf:
+            return m
+        a = {k: v for k, v in (self.veri.get("ayarlar") or {}).items() if k in hesap.AYARLAR}
+        if self.secim("tedarik_kargo") not in (None, ""):          # tedarikçinin adet başı kargosu navlun varsayımının yerine geçer
+            a["stok_navlun_tl"] = float(self.secim("tedarik_kargo"))
+        yeni = hesap.birim_maliyet(float(tf), 0, "stok", a)
+        yeni["kaynak"] = "tedarikçi toptan fiyatı"
+        return yeni
+
     def fiyat(self) -> dict:
-        """Satış fiyatı: seçim > dengeli seçenek (hedef marjı tutuyorsa) > minimum fiyat."""
+        """Satış fiyatı: seçim > dengeli seçenek (hedef marjı tutuyorsa) > minimum fiyat.
+        Toptan fiyat girildiyse seçenekler o maliyetle yeniden hesaplanır."""
+        import hesap
         sec = self.veri.get("fiyat_secenekleri") or []
+        a = {**hesap.AYARLAR, **{k: v for k, v in (self.veri.get("ayarlar") or {}).items() if k in hesap.AYARLAR}}
+        m = self.maliyet()
+        if self.secim("tedarik_fiyati"):
+            sec = hesap.fiyat_secenekleri(m, (self.veri.get("trendyol") or {}).get("ozet"), a)
         if self.secim("fiyat"):
-            import hesap
-            from hesap import fiyat_analizi
-            a = self.veri.get("ayarlar") or hesap.AYARLAR
-            m = self.veri["maliyet"]["stok"]
-            return {**fiyat_analizi(float(self.secim("fiyat")), m, a), "secenek": "elle seçilen"}
+            return {**hesap.fiyat_analizi(float(self.secim("fiyat")), m, a), "secenek": "elle seçilen"}
         d = next((s for s in sec if s["secenek"] == "dengeli" and s.get("hedefe_uygun")), None)
         mn = next((s for s in sec if s["secenek"].startswith("minimum")), None)
         return d or mn or (sec[0] if sec else {})
@@ -170,8 +202,37 @@ def projeyi_bul(ad_ya_da_yol: str) -> Proje:
 
 
 # ---------------------------------------------------------------- Gemini
+ABARTI = re.compile(r"\b(tüm|bütün)\s+(tüy|kir|leke|toz)\w*|\btamamen\b|\banında\b|\btek hareketle\b|\biz bırakmaz\b|"
+                    r"\bsonsuza kadar\b|%100\b|\bmucize\w*", re.I)
+
+
+def _duzelt(x):
+    """Model çıktısında: sayı eklerindeki düşen kesme işaretini düzelt (3ü 1 → 3'ü 1)."""
+    if isinstance(x, str):
+        return re.sub(r"\b(\d)(ü|u|ı|i)\s?(\d)\s(Arada|arada)", r"\1'\2 \3 \4", x)
+    if isinstance(x, list):
+        return [_duzelt(v) for v in x]
+    if isinstance(x, dict):
+        return {k: _duzelt(v) for k, v in x.items()}
+    return x
+
+
+def abarti_tara(veri) -> list[str]:
+    """Metinlerde kalan kesin sonuç / abartı ifadelerini bulur (kurallara rağmen model üretirse rapora uyarı düşmek için)."""
+    bulunan = []
+    def gez(x):
+        if isinstance(x, str):
+            bulunan.extend(f"“{m.group(0)}” → {x[:90]}" for m in ABARTI.finditer(x))
+        elif isinstance(x, list):
+            for v in x: gez(v)
+        elif isinstance(x, dict):
+            for v in x.values(): gez(v)
+    gez(veri)
+    return bulunan
+
+
 def metin_json(istem: str, sema: dict, sistem: str = "", sicaklik: float = 0.5) -> dict:
-    return _gm.json_sor(istem, sema, sistem=(KURALLAR + " " + sistem).strip(), sicaklik=sicaklik)
+    return _duzelt(_gm.json_sor(istem, sema, sistem=(KURALLAR + " " + sistem).strip(), sicaklik=sicaklik))
 
 
 def gemini_var() -> bool:

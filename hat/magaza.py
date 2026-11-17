@@ -12,11 +12,12 @@ from __future__ import annotations
 import csv
 import html
 import os
+import re
 import shutil
 
 import requests
 
-from ortak import Proje
+from ortak import Proje, tr_upper
 
 SHOPIFY_SURUM = os.getenv("SHOPIFY_API_SURUM", "2025-10")
 CSV_KOLON = ["Handle", "Title", "Body (HTML)", "Vendor", "Type", "Tags", "Published", "Option1 Name", "Option1 Value",
@@ -35,6 +36,11 @@ def govde_html(ic: dict) -> str:
     return "\n".join(s)
 
 
+def tl0(x) -> str:
+    """Türkçe tam sayı fiyat: 1199 → 1.199 TL."""
+    return f"{x:,.0f}".replace(",", ".") + " TL"
+
+
 def paketler(f: dict) -> list[tuple[str, float, float | None]]:
     tek = float(f.get("fiyat") or 0)
     return [("Tekli", tek, None), ("2'li paket", float(f.get("paket_2") or tek * 2), tek * 2),
@@ -43,7 +49,15 @@ def paketler(f: dict) -> list[tuple[str, float, float | None]]:
 
 def shopify_csv(p: Proje, ic: dict, m: dict, hedef):
     f = ic["fiyat"]
-    tutamac = ic["url"]
+    # Shopify handle: küçük harf, Türkçe karakter ve kesme işareti yok (3'ü → 3u, "3-u-1" değil)
+    tr = str.maketrans("çğıöşüÇĞİÖŞÜ", "cgiosuCGIOSU")
+    kaynak = re.sub(r"['’]", "", ic.get("urun_adi") or ic["url"]).translate(tr).lower()
+    parca, tutamac = re.findall(r"[a-z0-9]+", kaynak), ""
+    for w in parca:                              # kelime ortasından kesmeden en fazla 60 karakter
+        if len(tutamac) + len(w) + 1 > 60:
+            break
+        tutamac = f"{tutamac}-{w}" if tutamac else w
+    tutamac = tutamac or "urun"
     satirlar = []
     for i, (ad, fiyat, eski) in enumerate(paketler(f)):
         r = dict.fromkeys(CSV_KOLON, "")
@@ -71,7 +85,7 @@ def sayfa_html(ic: dict, m: dict, gorseller: list[str]) -> str:
         x.replace(" ", "+") + ":wght@400;600;700" for x in dict.fromkeys([bf, mf])) + "&display=swap"
     pk = "".join(
         f'<label class="pk"><input type="radio" name="pk" {"checked" if i == 0 else ""}><span>{e(ad)}</span>'
-        f'<b>{fiyat:,.0f} TL</b>{f"<s>{eski:,.0f} TL</s>" if eski else ""}</label>'
+        f'<b>{tl0(fiyat)}</b>{f"<s>{tl0(eski)}</s>" if eski else ""}</label>'
         for i, (ad, fiyat, eski) in enumerate(paketler(ic["fiyat"])))
     galeri = "".join(f'<img src="{e(g)}" alt="{e(ic["urun_adi"])}">' for g in gorseller[:6])
     sss = "".join(f"<details><summary>{e(x['soru'])}</summary><p>{e(x['cevap'])}</p></details>" for x in ic["sss"])
@@ -97,7 +111,7 @@ section{{max-width:820px;margin:0 auto;padding:8px 16px 32px}}details{{border-bo
 footer{{background:var(--notr);padding:24px 16px;font-size:13px;color:#555;text-align:center}}
 @media(max-width:760px){{main{{grid-template-columns:1fr}}.serit{{grid-template-columns:1fr 1fr}}}}
 </style></head><body>
-<header>{e(m['isim'].upper())}</header>
+<header>{e(tr_upper(m['isim']))}</header>
 <div class="serit">{serit}</div>
 <main><div class="galeri">{galeri}</div>
 <div><h1>{e(ic['urun_adi'])}</h1><p class="alt">{e(ic['alt_baslik'])}</p>
@@ -160,7 +174,7 @@ def calistir(p: Proje, args=None):
           "(taslak olarak gelir; görselleri elle yükle)",
           f"- **Shopify API:** {api['durum']}" + (f" — {api.get('neden') or api.get('hata') or ''}" if api.get('neden') or api.get('hata') else ""), "",
           "## Paketler (varyant)", "", "| Paket | Fiyat | Liste fiyatı |", "|---|---|---|"]
-    md += [f"| {ad} | {fi:,.0f} TL | {f'{es:,.0f} TL' if es else '-'} |" for ad, fi, es in paketler(f)]
+    md += [f"| {ad} | {tl0(fi)} | {tl0(es) if es else '-'} |" for ad, fi, es in paketler(f)]
     md += ["", "## Kurulum kontrol listesi (kaynaklar/ozetler/magaza.md)", ""] + [f"- [ ] {x}" for x in [
         "Domain bağla (marka adımındaki boş .com ya da .com.tr) — satın alma senin onayınla",
         "Tema: hızlı, sade, mobil uyumlu (Shopify'da ücretsiz Dawn yeterli; lisanssız/nulled tema KULLANMA)",

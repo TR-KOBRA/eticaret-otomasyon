@@ -4,9 +4,10 @@ Mesaj gönderilmez; sadece taslak üretilir. Numune siparişi insan onayıdır.
 """
 from __future__ import annotations
 
+import re
 import urllib.parse
 
-from ortak import Proje
+from ortak import Proje, tl
 
 SORULAR_EN = [
     "Are you the manufacturer of this product or a reseller?",
@@ -58,7 +59,9 @@ def calistir(p: Proje, args=None):
     kontrol += [f"Kargo riski: {n} — paketleme yeterli mi?" for n in kr.get("nedenler") or []]
     kontrol += [f"Satıcı verisini doğrula: {r['konu']}" for r in p.veri.get("riskler") or [] if r["seviye"] != "bilgi"]
 
-    arama = " ".join(u.get("baslik", "").split()[:6])
+    # Diğer satıcıları bulmak için: araştırmadaki Türkçe pazar kelimesi, yoksa başlığın ilk anlamlı kelimeleri
+    kelime = next(iter(((p.veri.get("trendler") or {}).get("kelimeler") or {}).keys()), None)
+    arama = kelime or " ".join(re.sub(r"[^\w\s-]", " ", u.get("baslik", "").split(":")[0]).split()[:5])
     alternatif = f"https://tr.aliexpress.com/w/wholesale-{urllib.parse.quote(arama)}.html?sortType=total_tranpro_desc"
     mesaj_en = ("Hello, I am planning to sell this product in Turkey and may place regular orders if the sample quality is good.\n"
                 f"Product: {u.get('link')}\n\nCould you please answer:\n"
@@ -69,7 +72,7 @@ def calistir(p: Proje, args=None):
     md = [f"# Tedarik — {u.get('baslik', '')[:80]}", "",
           f"**Mevcut satıcı:** {m.get('ad')} · olumlu %{m.get('olumlu_oran')} · {m.get('toplam')} değerlendirme", "",
           "| Kargo | Ücret | Gün | Takip |", "|---|---|---|---|"]
-    md += [f"| {k.get('firma')} | {'ücretsiz' if k.get('ucretsiz') else k.get('ucret_tl')} | {k.get('gun_min')}–{k.get('gun_max')} | "
+    md += [f"| {k.get('firma')} | {'ücretsiz' if k.get('ucretsiz') else tl(k.get('ucret_tl'))} | {k.get('gun_min')}–{k.get('gun_max')} | "
            f"{'var' if k.get('takip') else 'yok'} |" for k in kargo[:6]]
     md += ["", "## Yapılacaklar", "",
            "1. Aynı ürünü satan **en az 2 satıcı daha** bul ve karşılaştır (fiyat, teslim, mağaza puanı, yorum):",
@@ -77,7 +80,12 @@ def calistir(p: Proje, args=None):
            f"   - ya da: `python arastir.py kesfet \"<ingilizce kelime>\" --icermeli \"...\"` ve adayları `urun` ile incele",
            "2. Her satıcıya aşağıdaki mesajı gönder (AliExpress mesajlaşma). **Gönderimi sen yaparsın.**",
            "3. En iyi 1–2 satıcıdan **numune** sipariş et ve kontrol listesini doldur.",
-           "4. Numune uygunsa: `python hat.py onayla <proje> tedarik` — reklam adımı bu onay olmadan açılmaz.", "",
+           "4. Satıcı **toptan fiyat** verince sisteme gir (adet başı ürün TL; varsa adet başı uluslararası kargo):",
+           f"   `python hat.py sec {p.ad} tedarik_fiyati=<TL> tedarik_kargo=<TL>` ya da panelde Proje → Ayarlar. "
+           "Fiyat, kâr ve reklam eşikleri bu maliyetle yeniden hesaplanır.",
+           f"   Şu an hesapta: tek adet AliExpress fiyatı **{tl((p.veri.get('maliyet') or {}).get('stok', {}).get('kalemler', {}).get('urun'))}** "
+           f"→ birim maliyet **{tl(p.maliyet()['toplam'])}**" + (" (toptan fiyat girildi)" if p.secim('tedarik_fiyati') else " (toptan fiyat henüz yok)") + ".",
+           "5. Numune uygunsa onayla (panel ya da `python hat.py onayla <proje> tedarik`) — reklam adımı bu onay olmadan açılmaz.", "",
            "## Satıcıya mesaj (İngilizce)", "", "```", mesaj_en, "```", "",
            "## Yerli toptancı için 15 soru", ""] + [f"{i}. {q}" for i, q in enumerate(SORULAR_TR, 1)]
     md += ["", "## Numune kontrol listesi", ""] + [f"- [ ] {k}" for k in kontrol]

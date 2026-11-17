@@ -49,6 +49,10 @@ def _kar(secenekler: list[dict], rk: dict | None) -> tuple[int, str, list[str]]:
     mn = next((s for s in secenekler if s["secenek"].startswith("minimum")), None)
     if not d:
         return 0, "fiyat seçeneği hesaplanamadı", bayrak
+    if (rk or {}).get("benzer_yok"):
+        bayrak.append("Trendyol'da aynı ürün bulunamadı: fiyat piyasayla doğrulanamadı (boşluk olabilir ya da talep yok)")
+        return 1, (f"aynı ürün Trendyol'da yok ({(rk or {}).get('benzer_sayisi', 0)} eşleşme); maliyet × 3 fiyatında net marj "
+                   f"%{d['marj_yuzde']} — piyasa doğrulaması yok"), bayrak
     kaynak = "rakip medyanı" if (rk or {}).get("ozet", {}).get("medyan") else "maliyet × 3"
     if d["hedefe_uygun"]:
         puan, g = 2, f"{kaynak} ({d['fiyat']} TL) fiyatında net marj %{d['marj_yuzde']} (hedef ≥ %20)"
@@ -166,7 +170,8 @@ def puanla(u: dict, secenekler: list[dict], kargo_risk: dict, iade_orani: float,
             gj = gemini.json_sor(_gemini_istem(u, secenekler, rk, tr, analiz), _sema(), sistem=SISTEM, sicaklik=0.2)
             for k in GEMINI_KRITERLERI:
                 sonuc[k] = {"puan": max(0, min(2, int(gj[k]["puan"]))), "gerekce": gj[k]["gerekce"], "kaynak": "gemini"}
-            ek = {"hook_ornekleri": gj.get("hook_ornekleri") or [], "paket_onerisi": gj.get("paket_onerisi")}
+            ek = {"hook_ornekleri": gj.get("hook_ornekleri") or [], "paket_onerisi": gj.get("paket_onerisi"),
+                  "model": gemini.son_model()}
             if sonuc["video_anlatim"]["puan"] == 0:
                 bayraklar.append("Fayda videoda anlaşılmıyor")
         except Exception as e:
@@ -184,8 +189,11 @@ def puanla(u: dict, secenekler: list[dict], kargo_risk: dict, iade_orani: float,
     if yuksek:
         karar = "ELE"
         bayraklar = [f"Yüksek risk: {x}" for x in yuksek] + bayraklar
-    elif eksik and en_fazla >= 15 > toplam:
+    elif ek.get("gemini_hata") or (eksik and en_fazla >= 15 > toplam):
+        # Yapay zekâ kriterleri puanlanamadıysa ürün ELE edilmez: veri eksik, sonra yeniden puanlanır
         karar = "EKSİK VERİ"
+        if ek.get("gemini_hata"):
+            bayraklar = ["Gemini puanlayamadı → `arastir.py skorla <json>` ile yeniden puanla"] + bayraklar
     elif toplam >= 15 and (sonuc.get("kar_marji") or {}).get("puan") == 0:
         # Piyasa fiyatında kâr yoksa diğer kriterler ne kadar iyi olursa olsun test edilmez (fiyat-kar.md: hedef net marj ≥ %20)
         karar = "İYİLEŞTİR"

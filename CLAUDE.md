@@ -38,4 +38,8 @@ Trendyol yorumlu çalıştırma pahalı: ürün başına 15 yorum ≈ 0,37 $ ç�
 Panel: `panel/sunucu.py` (FastAPI, 127.0.0.1:8765) + `panel/index.html`, `app.js`, `app.css` (derlemesiz). Komutları CLI'lar üzerinden çalıştırır;
 `--gonder` panelde yok. Favori/red işaretleri `panel/veri.json`, iş logları `panel/isler/` (git dışı).
 Günlük tarama: `urun-arastirma/gunluk.py` (Görev Zamanlayıcı "Eticaret Gunluk Urun Taramasi", 09:00), kelimeler `gunluk-kelimeler.txt`.
-Skor: piyasa (Trendyol medyanı) fiyatında kâr yoksa (kar_marji=0) toplam ≥15 olsa da karar İYİLEŞTİR.
+Rakip kıyası: rakip_analiz `benzer_rakipler` → `rakipler.benzer_rakip` (aynı tür ürünler; <3 ise benzer_yok). Günlük taramada alaka (baş kelime + Gemini) ve ön eleme (`--on-eleme-kat`).
+Skor: piyasa (benzer rakip medyanı) fiyatında kâr yoksa (kar_marji=0) toplam ≥15 olsa da karar İYİLEŞTİR.
+Gemini: ücretsiz katmanda model başına ~20 istek/gün; `gemini.py` kota dolunca GEMINI_YEDEK_MODELLER'e (flash-lite) geçer, hepsi doluysa GeminiKota.
+Toptan fiyat: `hat.py sec <proje> tedarik_fiyati=<TL> tedarik_kargo=<TL>` → `Proje.maliyet()` / `fiyat()` yeniden hesaplar. Mağaza bilgisi: `kargo_esigi`, `hazirlik_gun`.
+Uçtan uca test sonuçları ve açık konular: `TEST-RAPORU.md` (test projesi `projeler/tuy-araci`).

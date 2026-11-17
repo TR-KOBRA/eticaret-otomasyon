@@ -78,12 +78,18 @@ def rakip_md(r: dict | None) -> list[str]:
     if r.get("hata"):
         return s + [f"_{r['hata']}_", ""]
     o = r["ozet"]
+    if r.get("benzer_yok"):
+        s += [f"> ⚠ Arama sonuçlarında bizim ürünle aynı tür/işlevde ürün bulunamadı ({r.get('benzer_sayisi', 0)} eşleşme). "
+              "Aşağıdaki fiyatlar başka ürünlere ait; fiyat kıyası yapılmadı.", ""]
+    elif r.get("benzerler") is not None:
+        t = r.get("tum_ozet") or {}
+        s += [f"Fiyat kıyası **{r['benzer_sayisi']} benzer ürünle** yapıldı (aramadaki tüm sonuçların medyanı {tl(t.get('medyan'))}).", ""]
     if o:
         s += [f"{o['urun_sayisi']} ürün · fiyat {tl(o['min'])} – {tl(o['max'])} · medyan **{tl(o['medyan'])}** "
               f"· alt/üst çeyrek {tl(o['alt_ceyrek'])} / {tl(o['ust_ceyrek'])} "
               f"· toplam {o['toplam_degerlendirme']} değerlendirme", ""]
     s += ["| Ürün | Marka | Fiyat | Puan | Değerlendirme | Favori | Satıcı |", "|---|---|---|---|---|---|---|"]
-    for u in sorted(r["urunler"], key=lambda x: -(int(x["degerlendirme"] or 0)))[:15]:
+    for u in (r.get("benzerler") or sorted(r["urunler"], key=lambda x: -(int(x["degerlendirme"] or 0))))[:15]:
         s.append(f"| [{(u['ad'] or '')[:55]}]({u['link']}) | {u['marka'] or '-'} | {tl(u['fiyat'])} | "
                  f"{u['puan'] or '-'} | {u['degerlendirme'] or 0} | {u['favori'] or '-'} | {u['satici'] or '-'} |")
     dusuk = [y for y in r.get("yorumlar", []) if (y["puan"] or 5) <= 3]
@@ -103,16 +109,19 @@ def degerlendir(u: dict, rk: dict | None, tr: dict | None, senaryo: str = "stok"
     secili = stok if senaryo == "stok" else dogrudan
     iade_orani, iade_neden = hesap.iade_orani_tahmini(u)
     a = hesap.ayarlar(kanal, {"iade_orani": iade_orani})
-    secenekler = hesap.fiyat_secenekleri(secili, (rk or {}).get("ozet"), a)
     rs = riskler.tara(u)
     kr = riskler.kargo_riski(u)
     an = None
     if analiz_yap:
         print("› Rakip ve yorum analizi (Gemini)…")
         an = rakip_analiz.analiz(u, rk)
+    # Fiyat kıyası sadece aynı tür/işlevdeki rakiplerle (kelime aramasındaki her sonuçla değil)
+    if an and not an.get("hata") and "benzer_rakipler" in an:
+        rk = rakipler.benzer_rakip(rk, an["benzer_rakipler"])
+    secenekler = hesap.fiyat_secenekleri(secili, (rk or {}).get("ozet") or None, a)
     print("› 20 puanlık skor kartı…")
     sk = skor.puanla(u, secenekler, kr, iade_orani, rk, tr, an, rs)
-    return {"kargo": kargo, "en_ucuz": en_ucuz, "maliyet": {"stok": stok, "dogrudan": dogrudan}, "senaryo": senaryo,
+    return {"rakip": rk, "kargo": kargo, "en_ucuz": en_ucuz, "maliyet": {"stok": stok, "dogrudan": dogrudan}, "senaryo": senaryo,
             "kanal": kanal, "ayarlar": {**a, "son_kontrol": hesap.AYARLAR_SON_KONTROL},
             "iade": {"oran": iade_orani, "neden": iade_neden}, "fiyat_secenekleri": secenekler, "riskler": rs,
             "kargo_riski": kr, "rakip_analizi": an, "skor": sk}
@@ -248,6 +257,7 @@ def urun(args):
 
 def rapor(u: dict, rk, tr, senaryo: str, kanal: str):
     d = degerlendir(u, rk, tr, senaryo, kanal)
+    rk = d["rakip"]                       # benzer rakiplere indirgenmiş veri (fiyat kıyası buna göre yapıldı)
     kargo, en_ucuz, rs = d["kargo"], d["en_ucuz"], d["riskler"]
     stok, dogrudan = d["maliyet"]["stok"], d["maliyet"]["dogrudan"]
 

@@ -35,6 +35,46 @@ def _sayi(x):
         return None
 
 
+def ozet_hesapla(urunler: list[dict]) -> dict:
+    """Fiyat dağılımı (min, çeyrekler, medyan, max) ve toplam değerlendirme."""
+    fiyatlar = sorted(u["fiyat"] for u in urunler if u.get("fiyat"))
+    if not fiyatlar:
+        return {}
+    return {
+        "urun_sayisi": len(urunler),
+        "min": fiyatlar[0],
+        "medyan": st.median(fiyatlar),
+        "max": fiyatlar[-1],
+        "alt_ceyrek": fiyatlar[len(fiyatlar) // 4],
+        "ust_ceyrek": fiyatlar[(len(fiyatlar) * 3) // 4],
+        "toplam_degerlendirme": sum(int(u.get("degerlendirme") or 0) for u in urunler),
+    }
+
+
+def benzer_rakip(rk: dict | None, numaralar: list[int] | None, en_az: int = 3) -> dict | None:
+    """Rakip analizinin seçtiği aynı tür/işlevdeki ürünlerle yeni bir rakip verisi döndürür.
+    Eşleşme `en_az`dan azsa: fiyat kıyası güvenilmez → ozet boş, `benzer_yok` işaretli (kelime ortalamasına güvenilmez)."""
+    if not rk or rk.get("hata") or numaralar is None:
+        return rk
+    liste = numarali_liste(rk)
+    secilen = [liste[i - 1] for i in sorted(set(numaralar)) if 1 <= i <= len(liste)]
+    yeni = {**rk, "tum_ozet": rk.get("tum_ozet") or rk.get("ozet"), "benzer_sayisi": len(secilen), "benzerler": secilen}
+    yeni.pop("benzer_yok", None)
+    if len(secilen) >= en_az:
+        yeni["ozet"] = {**ozet_hesapla(secilen), **{k: v for k, v in (rk.get("ozet") or {}).items() if k.startswith("apify")},
+                        "kapsam": f"{len(secilen)} benzer ürün (toplam {len(liste)} sonuçtan)"}
+    else:
+        yeni["ozet"] = {}
+        yeni["benzer_yok"] = True
+    return yeni
+
+
+def numarali_liste(rk: dict, adet: int = 40) -> list[dict]:
+    """Rakip analizi istemindeki numaralı liste ile aynı sıra (değerlendirme sayısına göre)."""
+    ur = sorted(rk.get("urunler") or [], key=lambda x: -int(x.get("degerlendirme") or 0))
+    return [u for u in ur if u.get("fiyat")][:adet]
+
+
 def trendyol(kelime: str, adet: int = 30, yorumlar: bool = False, yorum_adedi: int = 20) -> dict:
     token = os.getenv("APIFY_TOKEN")
     if not token:
@@ -97,19 +137,7 @@ def trendyol(kelime: str, adet: int = 30, yorumlar: bool = False, yorum_adedi: i
             "link": o.get("url"),
         })
 
-    fiyatlar = [u["fiyat"] for u in urunler if u["fiyat"]]
-    ozet = {}
-    if fiyatlar:
-        fiyatlar.sort()
-        ozet = {
-            "urun_sayisi": len(urunler),
-            "min": fiyatlar[0],
-            "medyan": st.median(fiyatlar),
-            "max": fiyatlar[-1],
-            "alt_ceyrek": fiyatlar[len(fiyatlar) // 4],
-            "ust_ceyrek": fiyatlar[(len(fiyatlar) * 3) // 4],
-            "toplam_degerlendirme": sum(int(u["degerlendirme"] or 0) for u in urunler),
-        }
+    ozet = ozet_hesapla(urunler)
     ozet["apify_ucret_usd"] = round(float(ucret or 0), 4)
     ozet["apify_aylik_harcanan_usd"] = _aylik_harcama(client)
     return {"kelime": kelime, "ozet": ozet, "urunler": urunler, "yorumlar": yorum_listesi}

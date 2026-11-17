@@ -11,7 +11,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-from ortak import Proje, gorsel_modeli, gorsel_uret, indir
+from ortak import Proje, gorsel_modeli, gorsel_uret, indir, tr_upper
 
 SADAKAT = ("The product must look EXACTLY like in the reference photo(s): same shape, proportions, colors, materials, "
            "number of parts and size. Do not add features, accessories, labels or text that are not in the reference. "
@@ -44,7 +44,7 @@ def wordmark(isim: str, renk: str, zemin: str, hedef: Path) -> Path:
     img = Image.new("RGB", (1080, 1080), zemin or "#FFFFFF")
     d = ImageDraw.Draw(img)
     f = _font(170)
-    metin = isim.upper()
+    metin = tr_upper(isim)
     x0, y0, x1, y1 = d.textbbox((0, 0), metin, font=f)
     d.text(((1080 - (x1 - x0)) / 2 - x0, (1080 - (y1 - y0)) / 2 - y0), metin, font=f, fill=renk or "#111111")
     img.save(hedef)

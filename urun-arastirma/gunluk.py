@@ -60,14 +60,69 @@ def _eslesen(baslik: list[str], arama: str) -> tuple[int, int]:
 
 
 def alakali(baslik: str | None, en: str, tr: str) -> bool:
-    """Başlık (TR sitesinde Türkçe çevrilmiş olur) arama kelimesinin en az 2 kökünü (tek kelimeyse 1) içermeli.
-    AliExpress popüler sıralaması bazen alakasız çok satanları da getiriyor (ör. tüy rulosu → takma kirpik)."""
+    """Başlık (TR sitesinde Türkçe çevrilmiş olur) arama kelimesinin en az 2 kökünü (tek kelimeyse 1) içermeli
+    VE ürün türünü söyleyen baş kelimeyi (Türkçede son kelime: '… streç KAPAK', İngilizcede son kelime: '… LIDS').
+    AliExpress popüler sıralaması bazen alakasız çok satanları getiriyor (tüy rulosu → takma kirpik, streç kapak → drone kılıfı)."""
     b = _kelimeler(baslik or "")
     for arama in (tr, en):
+        kelime = _kelimeler(arama)
+        if not kelime:
+            continue
         n, toplam = _eslesen(b, arama)
-        if toplam and n >= min(2, toplam):
+        bas = kelime[-1][:4]
+        if n >= min(2, toplam) and any(w.startswith(bas) for w in b):
             return True
     return False
+
+
+def gemini_alaka(adaylar: list[dict], en: str, tr: str) -> tuple[list[dict], str | None]:
+    """Tek Gemini isteğiyle başlıkları süzer: aranan ürün türünün kendisi mi (aksesuarı, yedeği, başka ürün değil)?
+    Gemini yoksa/hata verirse liste olduğu gibi döner."""
+    import gemini
+    if not adaylar or not gemini.var_mi():
+        return adaylar, None
+    istem = "\n".join([f"Aranan ürün: '{tr}' (İngilizce: '{en}').",
+                        "Aşağıdaki AliExpress başlıklarından hangileri bu ürün TÜRÜNÜN kendisi? Aksesuar, yedek parça, kılıf, "
+                        "başka bir ürün ya da sadece kelime benzerliği olanları dahil etme.", ""]
+                       + [f"{i}. {(u.get('baslik') or '')[:140]}" for i, u in enumerate(adaylar, 1)])
+    try:
+        g = gemini.json_sor(istem, {"type": "OBJECT", "properties": {"uygun": {"type": "ARRAY", "items": {"type": "INTEGER"}}},
+                                    "required": ["uygun"]}, sicaklik=0.0)
+    except Exception as e:  # noqa: BLE001
+        return adaylar, f"alaka kontrolü yapılamadı ({str(e)[:80]})"
+    sec = {int(i) for i in g.get("uygun") or [] if 1 <= int(i) <= len(adaylar)}
+    return [u for i, u in enumerate(adaylar, 1) if i in sec], None
+
+
+def on_eleme(aday: list[dict], rk: dict | None, kat: float) -> tuple[list[dict], list[dict]]:
+    """Derin incelemeden (Gemini + sayfa okuma) önce kaba kâr kontrolü: AliExpress fiyatından %20 marj için gereken
+    minimum satış fiyatı, Trendyol'daki bu kelimenin üst çeyrek fiyatının `kat` katından fazlaysa ürün elenir.
+    (Kelime düzeyinde kaba sınır; asıl kıyas derin incelemede benzer rakiplerle yapılır.)"""
+    o = (rk or {}).get("ozet") or {}
+    ust = o.get("ust_ceyrek")
+    for u in aday:
+        m = hesap.birim_maliyet(u.get("fiyat") or 0, 0, "stok")
+        u["tahmini_min_fiyat"] = hesap.minimum_fiyat(m, hesap.AYARLAR)
+        u["fiyat_orani"] = round(u["tahmini_min_fiyat"] / o["medyan"], 2) if o.get("medyan") else None
+    if not ust:
+        return aday, []
+    kalan = [u for u in aday if u["tahmini_min_fiyat"] <= kat * ust]
+    elenen = [u for u in aday if u["tahmini_min_fiyat"] > kat * ust]
+    return kalan, elenen
+
+
+def gemini_hazir() -> bool:
+    """Tek küçük istekle Gemini'nin (yedek modeller dahil) kullanılabilir olduğunu doğrular."""
+    import gemini
+    if not gemini.var_mi():
+        return False
+    try:
+        gemini.json_sor("Sadece {\"tamam\": true} döndür.", {"type": "OBJECT", "properties": {"tamam": {"type": "BOOLEAN"}}})
+        return True
+    except gemini.GeminiKota:
+        return False
+    except Exception:
+        return True            # geçici hata: taramayı engelleme
 
 
 def durum_oku() -> dict:
@@ -110,8 +165,12 @@ def calistir(args) -> int:
             print(f"  {len(bulunan)} ürün, {len(ilgili)} alakalı, filtre sonrası {len(aday)}")
 
             rk = None
+            kota_dolu = bool(aday) and not gemini_hazir()
             harcama = apify_harcama()
-            if not aday:
+            if kota_dolu:
+                notlar.append("Gemini günlük kotası dolu → ürünler incelenmedi, Apify'a para harcanmadı. Yarın tekrar denenecek.")
+                aday = []
+            elif not aday:
                 notlar.append(f"Filtreden geçen ürün yok ({len(bulunan)} bulundu): fiyat {args.min_fiyat:.0f}–{args.max_fiyat:.0f} TL, satış ≥ {args.min_satis}.")
             elif args.trendyol_yok:
                 notlar.append("Trendyol taraması kapalı (--trendyol-yok).")
@@ -126,9 +185,27 @@ def calistir(args) -> int:
                     notlar.append(f"Trendyol: {rk['hata']}")
                     rk = None
             medyan = (rk or {}).get("ozet", {}).get("medyan")
+            aday, elenen = on_eleme(aday, rk, args.on_eleme_kat)
+            if elenen:
+                ust = (rk or {}).get("ozet", {}).get("ust_ceyrek")
+                notlar.append(f"Ön elemede {len(elenen)} ürün atıldı: %20 marj için gereken fiyat, Trendyol'da bu kelimenin üst çeyrek "
+                              f"fiyatının ({ust:.0f} TL) {args.on_eleme_kat} katından fazla (derin incelemeye ve Gemini kotasına girmedi).")
+                ornek = sorted(elenen, key=lambda u: u["tahmini_min_fiyat"])[:5]
+                notlar += [f"  ↳ {(u.get('baslik') or '')[:60]} — gereken ≥ {u['tahmini_min_fiyat']:.0f} TL" for u in ornek]
             for u in aday:
                 u["skor"] = hesap.firsat_skoru(u, medyan)
+                if u.get("fiyat_orani"):                     # piyasaya yakın maliyet önce
+                    u["skor"] = round(u["skor"] - 15 * max(0.0, u["fiyat_orani"] - 1), 1)
             aday.sort(key=lambda x: -x["skor"])
+            if aday and not args.alaka_yok:
+                once = len(aday[:15])
+                secilen, hata = gemini_alaka(aday[:15], en, tr)
+                if hata:
+                    notlar.append(hata)
+                else:
+                    if len(secilen) < once:
+                        notlar.append(f"Yapay zekâ alaka kontrolü {once - len(secilen)} başlığı eledi (aksesuar / başka ürün).")
+                    aday = secilen
 
             tr_veri = trendler.talep([tr])
             for u0 in aday[: args.aday]:
@@ -137,11 +214,18 @@ def calistir(args) -> int:
                     u = ae.urun(ctx, u0["link"], yorum_adedi=40)
                     yol, deg = arastir.rapor(u, rk, tr_veri, "stok", "site")
                     sk = deg["skor"]
+                    gemini_hata = sk.get("gemini_hata")
                     f = next((s for s in deg["fiyat_secenekleri"] if s.get("secenek") == "dengeli"), deg["fiyat_secenekleri"][0])
                     sonuclar.append({"id": u["id"], "baslik": u["baslik"], "link": u0["link"], "karar": sk["karar"],
                                      "puan": sk["toplam"], "fiyat": f.get("fiyat"), "marj": f.get("marj_yuzde"),
                                      "rapor": str(yol), "json": str(yol.with_suffix(".json"))})
-                    d["gorulen"].append(u["id"])
+                    if gemini_hata:          # puanlanamadı: görüldü sayma, sonra yeniden denensin
+                        notlar.append(f"{u['id']} Gemini ile puanlanamadı ({gemini_hata[:120]}); sonraki taramada yeniden denenecek.")
+                        if "kota" in gemini_hata.lower():
+                            notlar.append("Gemini günlük kotası dolu → kalan ürünler atlandı (Apify'a para harcanmasın).")
+                            break
+                    else:
+                        d["gorulen"].append(u["id"])
                 except ae.DogrulamaGerekli:
                     raise
                 except Exception as e:
@@ -199,6 +283,9 @@ def main():
     p.add_argument("--min-fiyat", type=float, default=40)
     p.add_argument("--max-fiyat", type=float, default=1200)
     p.add_argument("--trendyol-yok", action="store_true")
+    p.add_argument("--on-eleme-kat", type=float, default=float(os.getenv("GUNLUK_ON_ELEME_KAT", "2.5")),
+                   help="gereken min fiyat > kat × Trendyol üst çeyrek ise derin incelemeden ele")
+    p.add_argument("--alaka-yok", action="store_true", help="Gemini alaka kontrolünü atla")
     sys.exit(calistir(p.parse_args()))
 
 
