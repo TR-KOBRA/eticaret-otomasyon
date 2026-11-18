@@ -1,18 +1,24 @@
 """Google Trends (Türkiye): talep yönü, mevsimsellik, ilgili aramalar.
 
-pytrends resmi olmayan bir istemcidir; Google sık istekte 429 döndürebilir.
-Bu durumda modül hata fırlatmaz, sonuçta "hata" alanını doldurur.
+İstemci: trendspyg (bakımı süren, pytrends uyumlu TrendReq; pytrends arşivlendi). engine="http": Google reddederse
+tarayıcı (Chrome) açarak denemez — sadece doğrudan istek; hata alınırsa sonuçta "hata" alanı dolar.
+trendspyg kurulu değilse eski pytrends'e düşer.
 """
 from __future__ import annotations
 
 import time
 
-from pytrends.request import TrendReq
+try:
+    from trendspyg.compat.request import TrendReq
+    _MOTOR = {"engine": "http"}          # tarayıcıya düşme yok
+except ImportError:                      # pragma: no cover
+    from pytrends.request import TrendReq
+    _MOTOR = {}
 
 
 def _istemci():
     # retries/backoff vermiyoruz: pytrends urllib3 2.x ile uyumsuz Retry argümanı kullanıyor
-    return TrendReq(hl="tr-TR", tz=-180, timeout=(10, 30))
+    return TrendReq(hl="tr-TR", tz=-180, timeout=(10, 30), **_MOTOR)
 
 
 def talep(kelimeler: list[str], donem: str = "today 12-m", geo: str = "TR") -> dict:

@@ -208,3 +208,22 @@ def firsat_skoru(u: dict, rakip_medyan: float | None = None) -> float:
     else:
         bosluk = 15.0                                          # bilinmiyor: nötr
     return round(talep + memnuniyet + bosluk, 1)
+
+
+def alis_tavani(satis_tl: float, a: dict | None = None) -> float | None:
+    """Bu fiyattan satınca hedef net marjı (%20) bırakan en yüksek KDV dahil toptan alış fiyatı (yerli tedarik).
+    Alış 0 TL olsa bile hedef tutmuyorsa None."""
+    a = {**AYARLAR, **(a or {})}
+    if not satis_tl:
+        return None
+    hedef = a["hedef_marj"] * 100
+    if fiyat_analizi(satis_tl, birim_maliyet(0, 0, "yerli", a), a)["marj_yuzde"] < hedef:
+        return None
+    lo, hi = 0.0, float(satis_tl)
+    for _ in range(40):
+        m = (lo + hi) / 2
+        if fiyat_analizi(satis_tl, birim_maliyet(m, 0, "yerli", a), a)["marj_yuzde"] >= hedef:
+            lo = m
+        else:
+            hi = m
+    return round(lo, 0)

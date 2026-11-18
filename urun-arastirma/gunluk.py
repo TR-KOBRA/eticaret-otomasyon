@@ -87,7 +87,7 @@ def gemini_alaka(adaylar: list[dict], en: str, tr: str) -> tuple[list[dict], str
                        + [f"{i}. {(u.get('baslik') or '')[:140]}" for i, u in enumerate(adaylar, 1)])
     try:
         g = gemini.json_sor(istem, {"type": "OBJECT", "properties": {"uygun": {"type": "ARRAY", "items": {"type": "INTEGER"}}},
-                                    "required": ["uygun"]}, sicaklik=0.0)
+                                    "required": ["uygun"]}, sicaklik=0.0, toplu=True)
     except Exception as e:  # noqa: BLE001
         return adaylar, f"alaka kontrolü yapılamadı ({str(e)[:80]})"
     sec = {int(i) for i in g.get("uygun") or [] if 1 <= int(i) <= len(adaylar)}

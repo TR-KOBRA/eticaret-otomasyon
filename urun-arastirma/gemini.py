@@ -56,8 +56,10 @@ def _gunluk_kota_mi(r: requests.Response) -> bool:
     return False
 
 
-def json_sor(istem: str, sema: dict, sistem: str | None = None, sicaklik: float = 0.3, deneme: int = 3) -> dict:
-    """İstemi gönderir, `sema`ya (OpenAPI alt kümesi) uyan JSON döndürür."""
+def json_sor(istem: str, sema: dict, sistem: str | None = None, sicaklik: float = 0.3, deneme: int = 3, toplu: bool = False) -> dict:
+    """İstemi gönderir, `sema`ya (OpenAPI alt kümesi) uyan JSON döndürür.
+    toplu=True: basit/sık işler (seçim, eşleştirme, alaka) önce hafif (flash-lite) modelle — ana modelin günlük kotası
+    puanlama ve metin üretimine kalır, yanıt da daha hızlı gelir."""
     anahtar = os.getenv("GEMINI_API_KEY")
     if not anahtar:
         raise GeminiYok("GEMINI_API_KEY tanımlı değil")
@@ -72,7 +74,10 @@ def json_sor(istem: str, sema: dict, sistem: str | None = None, sicaklik: float 
     if sistem:
         govde["systemInstruction"] = {"parts": [{"text": sistem}]}
     son_hata = None
-    adaylar = [x for x in modeller() if x not in _DOLU]
+    sira = modeller()
+    if toplu:
+        sira = sira[1:] + sira[:1]
+    adaylar = [x for x in sira if x not in _DOLU]
     for m in [x for x in adaylar if x not in _YAVAS] + [x for x in adaylar if x in _YAVAS]:
         for i in range(deneme):
             try:

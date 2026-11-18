@@ -1,10 +1,11 @@
 # E-ticaret hattı
 
-AliExpress ürününden Türkiye'de satışa kadar 11 adım. Adım 1 `urun-arastirma/`, adım 2–11 `hat.py` + `hat/`.
+Ürün sinyalinden (Amazon yeni çıkanlar → Türkiye doğrulaması) ya da AliExpress araştırmasından Türkiye'de satışa kadar 11 adım.
+Adım 1 `urun-arastirma/`, adım 2–11 `hat.py` + `hat/`. Tedarik varsayılanı yerli toptancı / Türkiye'de üretim (KDV dahil alış).
 
 ```
 1 araştırma ─ skor ≥ 15 (TESTE AL) ─▶ hat.py yeni
-2 tedarik    satıcı mesajı (15 soru), numune kontrol listesi          ⏸ onay: numune iyi
+2 tedarik    alış tavanı, Trendyol satıcıları, İstoç/üretim, telefon metni, 15 soru, toptancı kartı, numune listesi   ⏸ onay: numune iyi
 3 marka      8 isim + .com kontrolü, kimlik, renk/font, logo brifi    ⏸ onay: --secim isim=...
 4 icerik     ürün sayfası, SSS, SEO, paket metinleri, yasal şablonlar
 5 gorsel     Gemini: beyaz zemin, 2 yaşam, detay, kapak + yazı logo   ⏸ onay: görseller gerçeğe uygun
@@ -22,9 +23,10 @@ Masaüstündeki **E-ticaret Paneli** kısayolu ya da `panel/panel_ac.cmd` → ht
 
 | Sayfa | Ne yapar |
 |---|---|
-| Ana sayfa | yapılacaklar (onay bekleyen / çalıştırılabilir adımlar, TESTE AL adaylar), satış hattı, Apify bütçesi |
-| Ürün keşfi | tüm araştırmalar: maliyet, %20 marj için fiyat, Trendyol medyanı, fiyat uyumu; ürün çekmecesi (skor, fiyat bandı, pazar, riskler), favori / reddet / projeye çevir / yeniden puanla |
-| Günlük tarama | zamanlanmış görev durumu, kelime listesi düzenleme, günlük raporlar |
+| Ana sayfa | yapılacaklar, yeni ürün sinyalleri, incelenen ürünler, satış hattı, Apify bütçesi |
+| Ürün sinyali | Amazon yeni çıkanlar → Trendyol doygunluğu, Meta reklamveren sayısı, alış tavanı; çekmecede **Projeye çevir** |
+| Ürün keşfi | tüm araştırmalar: maliyet, alış tavanı (piyasa medyanında %20 net), Trendyol medyanı; eski AliExpress kayıtları "eski yöntem"; ürün çekmecesi (skor, fiyat bandı, pazar, riskler), favori / reddet / projeye çevir / yeniden puanla |
+| Otomatik tarama | zamanlanmış sinyal görevi, çalışmalar, Amazon kategori listesi, eski AliExpress raporları (arşiv) |
 | Projeler | aşamaya göre pano; proje sayfasında 11 adım (çalıştır, onayla, rapor, görsel, mağaza önizleme), kâr, reklam performansı (CPA/ROAS/huni), içerik takvimi, haftalık finans |
 | Kâr hesaplayıcı | fiyat / indirim / kanal / iade / reklam payı → net kâr, marj, başabaş ROAS, hedef CPA, test bütçesi, paket teklifi |
 | Ayarlar | bağlantılar (sadece bağlı mı), Apify harcaması, hesaplama varsayımları |
@@ -36,7 +38,9 @@ Panel komutları mevcut CLI'lar üzerinden çalıştırır. Shopify/Meta gönder
 `python urun-arastirma/sinyal.py` (ya da panel → Ürün sinyali → Yeni sinyal çek): Amazon'da **yeni çıkıp yükselen** ürünler →
 puan ≥ 3,5, fiyat 6–100 $, yorum ≤ 1000 → yapay zekâ Türkiye'ye uygun, problem çözen ürünleri seçer → Trendyol'da aynı tür ürünler ve
 **doygunluk** (100+ yorumlu güçlü rakip ≤ 5 uygun, ≥ 10 doymuş) → **alış tavanı**: Trendyol medyanında %20 net kâr için toptancıdan en fazla
-kaça (KDV dahil) alınmalı. Karar Olur / Belki / Olmaz. Bir çalıştırma ≈ 0,30–0,50 $ (aylık 3 $ tavanı).
+kaça (KDV dahil) alınmalı. Karar Olur / Belki / Olmaz. Bir çalıştırma ≈ 0,33 $ (aylık 4 $ tavanı, `SINYAL_APIFY_TAVAN_USD`).
+Projeye çevirme: `python urun-arastirma/sinyal_proje.py <asin>` → `cikti/urun-sinyal-<asin>-….json` → `hat.py yeni … [--zorla]` (panelde tek düğme).
+TikTok Shop kaynağı (`sinyal.py --tiktok`) kodlu ama Apify ücretsiz planında veri vermiyor; ücretli planda çalışır.
 
 ## Shopify (panel → Mağaza)
 
@@ -44,11 +48,17 @@ Shopify yönetici → Ayarlar → Uygulamalar → Uygulama geliştir → özel u
 Mağaza adresini ve `shpat_…` anahtarını panelde **Mağaza** sayfasından gir (sadece bu bilgisayardaki `.env`'e yazılır).
 Sonra: son 7/30/90 gün ciro, sipariş, ortalama sepet, iade ve ürünler; projeden onaylı **taslak** ürün gönderimi. Panel sipariş, fiyat ya da tema değiştirmez.
 
-## Günlük tarama
+## Otomatik tarama
 
-Windows Görev Zamanlayıcı her gün 09:00'da `urun-arastirma/gunluk_calistir.cmd` çalıştırır (bilgisayar kapalıysa açılınca):
-`gunluk-kelimeler.txt`'den sıradaki kelime → AliExpress (alakasız sonuçlar elenir) → Trendyol (aylık 3 $ tavanı) → en iyi 3 ürün
-20 puanla değerlendirilir → `cikti/gunluk/<tarih>.md` ve birikimli `adaylar.md`. CAPTCHA çıkarsa durur, atlatmaz.
+Windows Görev Zamanlayıcı ("Eticaret Gunluk Urun Taramasi") **Pazartesi ve Perşembe 09:00**'da `urun-arastirma/sinyal_calistir.cmd`
+çalıştırır (bilgisayar kapalıysa açılınca): `sinyal-kategoriler.txt`'den sıradaki 2 kategori × 30 Amazon ürünü, 3 Trendyol doğrulaması,
+Meta Reklam Kütüphanesi → `cikti/sinyal/`, log `cikti/sinyal/log.txt`. Eski AliExpress günlük taraması (`gunluk.py`) artık zamanlanmıyor;
+raporları panelde arşiv olarak durur.
+
+## Testler
+
+`python testler.py` — internetsiz, para harcamadan: hesap (yerli, KDV mahsubu, minimum fiyat, alış tavanı), doygunluk, riskler,
+reklam kararları, Shopify özeti, günlük alaka, sinyal → proje dönüşümü, tedarik raporu, panel toptancı kartı doğrulaması.
 
 ## Kullanım (terminal)
 

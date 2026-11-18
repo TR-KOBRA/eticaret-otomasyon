@@ -1,6 +1,6 @@
 # E-ticaret otomasyonu
 
-Türkiye pazarı için AliExpress'ten ürün bulup marka, mağaza, içerik ve reklama giden modüler hat.
+Türkiye pazarı için ürün bulup (ana yol: Amazon sinyali → Türkiye doğrulaması → yerli toptancı; eski yol: AliExpress) marka, mağaza, içerik ve reklama giden modüler hat.
 Adım 1 `urun-arastirma/` (kendi CLI'ı), adım 2–11 `hat.py` + `hat/<adim>.py`: her ürün `projeler/<ad>/` klasörü,
 adımlar `durum.json`daki onay kapılarıyla sırayla çalışır (bkz. `README.md`). Yeni adım eklerken `hat/ortak.py` ADIMLAR'a
 kaydet, `calistir(p: Proje, args)` yaz, `p.yaz(adim, veri, md)` ile çıktı ver, metin üretiminde `metin_json` (ortak KURALLAR) kullan.
@@ -39,7 +39,8 @@ Trendyol yorumlu çalıştırma pahalı: ürün başına 15 yorum ≈ 0,37 $ ç�
 Panel: `panel/sunucu.py` (FastAPI, 127.0.0.1:8765) + `panel/index.html`, `app.js`, `app.css` (derlemesiz). Komutları CLI'lar üzerinden çalıştırır;
 Panel tasarımı: açık tema varsayılan (koyu seçilebilir), karar dili "Olur / Belki / Olmaz" (TESTE AL / İYİLEŞTİR / ELE), önce hüküm + tek cümle neden, ayrıntı açılır bölümlerde; grafikler dataviz kuralları (ince işaret, 2px boşluk, ipucu).
 `--gonder` panelde yok. Favori/red işaretleri `panel/veri.json`, iş logları `panel/isler/` (git dışı).
-Günlük tarama: `urun-arastirma/gunluk.py` (Görev Zamanlayıcı "Eticaret Gunluk Urun Taramasi", 09:00), kelimeler `gunluk-kelimeler.txt`.
+Otomatik tarama: Görev Zamanlayıcı "Eticaret Gunluk Urun Taramasi" Pzt+Per 09:00 → `urun-arastirma/sinyal_calistir.cmd` (2 kategori × 30, 3 doğrulama, Trendyol 20 sonuç).
+Eski AliExpress günlük taraması `gunluk.py` (kelimeler `gunluk-kelimeler.txt`) zamanlanmıyor; panelde arşiv.
 Rakip kıyası: rakip_analiz `benzer_rakipler` → `rakipler.benzer_rakip` (aynı tür ürünler; <3 ise benzer_yok). Günlük taramada alaka (baş kelime + Gemini) ve ön eleme (`--on-eleme-kat`).
 Skor: piyasa (benzer rakip medyanı) fiyatında kâr yoksa (kar_marji=0) toplam ≥15 olsa da karar İYİLEŞTİR.
 Gemini: ücretsiz katmanda model başına ~20 istek/gün; `gemini.py` kota dolunca GEMINI_YEDEK_MODELLER'e (flash-lite) geçer, hepsi doluysa GeminiKota.
@@ -48,7 +49,7 @@ Uçtan uca test sonuçları ve açık konular: `TEST-RAPORU.md` (test projesi `p
 Ürün sinyali (Mert Kurtul yöntemi): `urun-arastirma/sinyal.py` — Amazon "New Releases" (Apify fanndev/amazon-bestsellers-movers-tracker,
 CAPTCHA çözmez, ~0,003 $/ürün; Movers & Shakers listesi boş döndüğü için yeni çıkanlar kullanılıyor) → Mert filtresi → Gemini seçimi (TR'ye lokalleşen,
 problem çözen, sarf/gıda/marka değil) → Trendyol benzer + `rakipler.doygunluk` → `alis_tavani` (TR medyanında %20 net için KDV dahil max toptan alış).
-Kategoriler `sinyal-kategoriler.txt`, aynı gün Amazon listesi önbellekten, `SINYAL_APIFY_TAVAN_USD` (3 $). Panel: "Ürün sinyali" sayfası.
+Kategoriler `sinyal-kategoriler.txt`, aynı gün Amazon listesi önbellekten, `SINYAL_APIFY_TAVAN_USD` (4 $). Panel: "Ürün sinyali" sayfası.
 Maliyet modeli (2026-11-18): senaryo `yerli` (KDV dahil toptan alış + kargo + koli, gümrük yok) varsayılan; `kdv_mahsup` (yerli kalemlerin alış KDV'si düşülür),
 `shopify_komisyonu` %2 (site); `brut_marj_yuzde` (reklam/iade öncesi, hedef %40–50). Skor kapıları: doygunluk "doymus" ve giyim/takı/ayakkabı → en fazla İYİLEŞTİR.
 Meta Reklam Kütüphanesi: `urun-arastirma/reklam_kutuphanesi.py` — herkese açık sayfa, normal Playwright (gizlenme/undetected-chromedriver YOK,
@@ -57,3 +58,14 @@ Sinyal akışına bağlı (`--reklam-yok` ile kapatılır).
 Shopify panel: `panel/shopify_baglanti.py` (Admin GraphQL, sadece okuma: mağaza, siparişler→ciro/sipariş/sepet/iade, ürünler; 5 dk önbellek),
 panel "Mağaza (Shopify)" sayfası; anahtarlar panel formuyla `eticaret/.env`'e yazılır (`/api/anahtar`, değer asla geri dönmez, biçim doğrulanır);
 projede "Shopify'a taslak gönder" onay kutusu ister → `hat.py calistir <p> magaza --gonder` (TASLAK). Gerçek mağazayla henüz test edilmedi.
+Sinyal → proje (2026-11-18): `urun-arastirma/sinyal_proje.py` sinyal kaydını araştırma JSON'una çevirir (`cikti/urun-sinyal-<asin>-….json`,
+`kaynak: "sinyal"`, maliyet = alış tavanı TAHMİNİ, yoksa Amazon fiyatı × kur × 0,35); panel `/api/sinyal-json/{asin}` + "Projeye çevir".
+Tedarik adımı yerli öncelikli (`hat/tedarik.py`): alış tavanı projenin satış fiyatından, piyasa medyanı ayrı uyarı; Trendyol satıcıları (link
+`-p-<id>` ile tekil), İstoç / üretim / pazaryeri toptancısı yolları, telefon metni, 15 soru; İngilizce AliExpress mesajı sadece AliExpress kaynaklıda ek.
+Toptancı kartı secimler: `toptanci_ad`, `toptanci_tel`, `toptanci_not` (metin), `tedarik_tipi` (yerli/uretim/ithal), `fatura` (var/yok),
+`dropship` (evet/hayir), `moq`, `teslim_gun` (sayı) — panel `/sec` bunları doğrular.
+`hesap.alis_tavani(satis, a)` ortak fonksiyon (sinyal, tedarik, keşif kartları). Keşif kartı "Gereken" yerine "Alış tavanı", AliExpress kayıtları "eski yöntem".
+Gemini: `json_sor(..., toplu=True)` önce flash-lite (sinyal seçimi/eşleştirme, günlük alaka; ~1 sn) → ana modelin kotası puanlama/metne kalır.
+Trends: `trendler.py` trendspyg `compat.TrendReq` (engine="http": Google reddederse Chrome'a DÜŞMEZ); yoksa pytrends.
+TikTok: `sinyal.py --tiktok` (lergassy/tiktok-shop-top-products-scraper) Apify ücretsiz planında veri vermiyor; doliz çerez, datapeak/bovi residential proxy istiyor → panelde düğme yok.
+Testler: `python testler.py` (unittest, internetsiz). Panel statik dosyaları `Cache-Control: no-cache`.

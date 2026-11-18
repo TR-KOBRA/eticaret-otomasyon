@@ -159,7 +159,15 @@ def _aday_ozeti(j: Path, v: dict) -> dict:
         "ayrisma": an.get("ayrisma_puani"),
         "tarih": dt.datetime.strptime(m.group(1), "%Y%m%d-%H%M").isoformat(timespec="minutes") if m else None,
         "json": j.name, "rapor": j.with_suffix(".md").name if j.with_suffix(".md").exists() else None,
+        "yontem": "sinyal" if v.get("kaynak") == "sinyal" else "aliexpress",
+        "alis_tavani": _tavan(rk.get("medyan")) if rk.get("medyan") else None,
     }
+
+
+def _tavan(medyan: float) -> float | None:
+    """Piyasa medyanında %20 net için KDV dahil en yüksek toptan alış (yerli tedarik)."""
+    import hesap
+    return hesap.alis_tavani(medyan, hesap.ayarlar("site"))
 
 
 def arastirmalar() -> list[dict]:
@@ -273,6 +281,7 @@ def genel():
         "arastirma_sayisi": len(ar),
         "karar_dagilimi": {k: sum(1 for x in ar if x["karar"] == k) for k in ("TESTE AL", "İYİLEŞTİR", "EKSİK VERİ", "ELE")},
         "son_arastirmalar": ar[:6],
+        "sinyal": sinyal_ozeti(),
         "gunluk": {"son": gd.get("son"), "sonraki_kelime": kelimeler[gd.get("sira", 0) % len(kelimeler)] if kelimeler else None,
                    "kelime_sayisi": len(kelimeler), "gunler": [g.stem for g in gunler[:30]]},
         "anahtarlar": {k: bool(os.getenv(k)) for k in ANAHTARLAR},
@@ -411,17 +420,28 @@ def onay_geri(ad: str, istek: OnayIstek):
     return {"tamam": True}
 
 
-SECILEBILIR = {"fiyat", "gunluk_butce", "set_butce", "set_sayisi", "yas_min", "yas_max", "test_saat", "tedarik_fiyati", "tedarik_kargo", "kargo_esigi", "hazirlik_gun"}
+SECILEBILIR = {"fiyat", "gunluk_butce", "set_butce", "set_sayisi", "yas_min", "yas_max", "test_saat", "tedarik_fiyati", "tedarik_kargo", "kargo_esigi", "hazirlik_gun",
+               "moq", "teslim_gun"}
+# Toptancı kartı: serbest metin alanları (sayı olmayan)
+SECILEBILIR_METIN = {"toptanci_ad": 80, "toptanci_tel": 30, "toptanci_not": 300}
+SECILEBILIR_SECENEK = {"tedarik_tipi": {"yerli", "uretim", "ithal"}, "fatura": {"var", "yok"}, "dropship": {"evet", "hayir"}}
 
 
 @app.post("/api/proje/{ad}/sec")
 def sec(ad: str, degerler: dict):
     p = _proje(ad)
     for k, v in degerler.items():
-        if k not in SECILEBILIR:
+        if k not in SECILEBILIR and k not in SECILEBILIR_METIN and k not in SECILEBILIR_SECENEK:
             raise HTTPException(400, f"Bu ayar değiştirilemez: {k}")
         if v in (None, ""):
             p.durum["secimler"].pop(k, None)
+        elif k in SECILEBILIR_METIN:
+            v = re.sub(r"[\x00-\x1f]", " ", str(v)).strip()[:SECILEBILIR_METIN[k]]
+            p.durum["secimler"][k] = v
+        elif k in SECILEBILIR_SECENEK:
+            if str(v) not in SECILEBILIR_SECENEK[k]:
+                raise HTTPException(400, f"{k}: {', '.join(sorted(SECILEBILIR_SECENEK[k]))} olmalı")
+            p.durum["secimler"][k] = str(v)
         else:
             try:
                 float(str(v).replace(",", "."))
@@ -489,6 +509,12 @@ def yeni(istek: YeniIstek):
 SINYAL = CIKTI / "sinyal"
 
 
+def _baslangica_uygun_degil(u: dict) -> bool:
+    import riskler
+    metin = f"{u.get('title') or ''} {u.get('tr_kelime') or ''} {u.get('urun_turu') or ''}".lower()
+    return any(riskler._kelime(metin, k) for k in riskler.BASLANGICA_UYGUN_DEGIL.values())
+
+
 @app.get("/api/sinyaller")
 def sinyaller():
     """Son sinyal çalıştırmalarındaki ürünler (aynı ASIN'in en yenisi), karar sırasına göre."""
@@ -499,6 +525,8 @@ def sinyaller():
         calismalar.append({"zaman": v.get("zaman"), "kategoriler": v.get("kategoriler"), "adet": len(v.get("urunler") or []),
                            "notlar": v.get("notlar") or []})
         for u in v.get("urunler") or []:
+            if _baslangica_uygun_degil(u):
+                continue                       # eski kayıtlar: giyim/takı/ayakkabı filtresinden önce seçilmiş olabilir
             u["zaman"] = v.get("zaman")
             u["usd_tl"] = v.get("usd_tl")
             son[u.get("asin") or u.get("title")] = u
@@ -508,9 +536,74 @@ def sinyaller():
     return {"urunler": urunler, "calismalar": calismalar[-10:][::-1], "son": d.get("son")}
 
 
+KATEGORI_DOSYA = ARASTIRMA / "sinyal-kategoriler.txt"
+AMAZON_KATEGORILER = {
+    "pet-supplies": "Evcil hayvan", "kitchen": "Mutfak", "home-garden": "Ev ve bahçe", "baby-products": "Bebek", "office-products": "Ofis",
+    "automotive": "Oto", "sporting-goods": "Spor", "hi": "Alet ve ev tadilatı", "toys-and-games": "Oyuncak", "garden": "Bahçe",
+    "arts-crafts": "Hobi ve el işi", "electronics": "Elektronik (faturasız riskli)", "beauty": "Güzellik (sağlık vaadi riski)",
+}
+
+
+def sinyal_kategorileri() -> list[str]:
+    if not KATEGORI_DOSYA.exists():
+        return ["pet-supplies", "kitchen"]
+    return [s.split("#")[0].strip() for s in KATEGORI_DOSYA.read_text(encoding="utf-8").splitlines() if s.split("#")[0].strip()]
+
+
+def sinyal_ozeti() -> dict:
+    d = _json(SINYAL / "durum.json") or {}
+    k = sinyal_kategorileri()
+    sira = d.get("sira", 0)
+    return {"son": d.get("son"), "kategoriler": k, "sira": sira % max(1, len(k)),
+            "sonraki": [k[(sira + i) % len(k)] for i in range(min(2, len(k)))] if k else []}
+
+
+@app.get("/api/sinyal-kategoriler")
+def sinyal_kategoriler_oku():
+    calismalar = []
+    for f in sorted(SINYAL.glob("sinyal-*.json"), reverse=True)[:12]:
+        v = _json(f) or {}
+        u = v.get("urunler") or []
+        calismalar.append({"zaman": v.get("zaman"), "kategoriler": v.get("kategoriler"), "adet": len(u),
+                           "olur": sum(1 for x in u if x.get("karar") == "TESTE AL"), "notlar": v.get("notlar") or []})
+    return {**sinyal_ozeti(), "secenekler": AMAZON_KATEGORILER, "gorev": gorev_durumu(), "apify": apify_durum(), "calismalar": calismalar}
+
+
+class KategoriIstek(BaseModel):
+    liste: list[str]
+
+
+@app.put("/api/sinyal-kategoriler")
+def sinyal_kategoriler_yaz(istek: KategoriIstek):
+    temiz = list(dict.fromkeys(k.strip().lower() for k in istek.liste if re.fullmatch(r"[a-z0-9-]{2,40}", k.strip().lower())))
+    if not temiz:
+        raise HTTPException(400, "Liste boş olamaz")
+    eski = KATEGORI_DOSYA.read_text(encoding="utf-8").splitlines() if KATEGORI_DOSYA.exists() else []
+    yorum = [s for s in eski if s.startswith("#")]
+    KATEGORI_DOSYA.write_text("\n".join(yorum + temiz) + "\n", encoding="utf-8")
+    return sinyal_ozeti()
+
+
+@app.post("/api/sinyal-json/{asin}")
+def sinyal_json(asin: str):
+    """Sinyali araştırma JSON'una çevirir (projeye çevirmenin ilk adımı)."""
+    if not re.fullmatch(r"[A-Z0-9]{10,24}", asin):
+        raise HTTPException(400, "Geçersiz ASIN")
+    if str(ARASTIRMA) not in sys.path:
+        sys.path.insert(0, str(ARASTIRMA))
+    import sinyal_proje
+    try:
+        yol = sinyal_proje.kaydet(asin)
+    except SystemExit as e:
+        raise HTTPException(400, str(e))
+    v = _json(yol) or {}
+    return {"json": yol.name, "baslik": v["urun"]["baslik"], "karar": v["skor"]["karar"]}
+
+
 @app.post("/api/sinyal-calistir")
-def sinyal_calistir():
-    return is_baslat("Ürün sinyali (Amazon → Trendyol)", [PY, "-W", "ignore", "sinyal.py"], ARASTIRMA, "sinyal")
+def sinyal_calistir(tiktok: bool = False):
+    komut = [PY, "-W", "ignore", "sinyal.py"] + (["--tiktok"] if tiktok else [])
+    return is_baslat("Ürün sinyali (Amazon" + (" + TikTok" if tiktok else "") + " → Trendyol)", komut, ARASTIRMA, "sinyal")
 
 
 @app.post("/api/gunluk-calistir")
@@ -549,7 +642,7 @@ def apify_durum() -> dict:
         return rakipler._aylik_harcama(ApifyClient(os.getenv("APIFY_TOKEN")))
     h = _onbellek("apify", 600, oku)
     return {"harcanan": h, "butce": float(os.getenv("APIFY_AYLIK_BUTCE_USD", "5")),
-            "gunluk_tavan": float(os.getenv("GUNLUK_APIFY_TAVAN_USD", "3"))}
+            "gunluk_tavan": float(os.getenv("GUNLUK_APIFY_TAVAN_USD", "3")), "sinyal_tavan": float(os.getenv("SINYAL_APIFY_TAVAN_USD", "4"))}
 
 
 def gorev_durumu() -> dict | None:
@@ -741,14 +834,17 @@ def ayarlar_oku():
             "apify": apify_durum(), "gorev": gorev_durumu(), "anahtarlar": {k: bool(os.getenv(k)) for k in ANAHTARLAR}}
 
 
+TAZE = {"Cache-Control": "no-cache"}      # panel güncellenince tarayıcı eski dosyayı göstermesin
+
+
 @app.get("/app.js")
 def app_js():
-    return FileResponse(PANEL / "app.js", media_type="text/javascript")
+    return FileResponse(PANEL / "app.js", media_type="text/javascript", headers=TAZE)
 
 
 @app.get("/app.css")
 def app_css():
-    return FileResponse(PANEL / "app.css", media_type="text/css")
+    return FileResponse(PANEL / "app.css", media_type="text/css", headers=TAZE)
 
 
 

@@ -1,5 +1,5 @@
 playwright>=1.45
-pytrends>=4.9
+trendspyg[analysis]==1.9.0   # Google Trends (pytrends arşivlendi; trendler.py yoksa pytrends dener)
 apify-client>=1.7
 python-dotenv>=1.0
 pandas

@@ -1,5 +1,6 @@
 /* E-ticaret paneli v2 — tek sayfa uygulama (derleme yok). Veriler /api/* uçlarından gelir. */
 "use strict";
+let SINYALLER = [];
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
@@ -28,6 +29,11 @@ function neden(a) {
   if (a.yuksek_risk) return {c: "bad", t: `${a.yuksek_risk} yüksek risk (marka, sağlık ya da kargo)`};
   if (a.karar === "EKSİK VERİ") return {c: "gri", t: "Yapay zekâ puanlayamadı, yeniden puanla"};
   if (a.benzer_yok) return {c: "info", t: "Trendyol'da aynısı yok: fiyat doğrulanamadı"};
+  if (a.rakip_medyan && !a.alis_tavani) return {c: "bad", t: `Piyasa ${tl(a.rakip_medyan)}: kargo + reklam sonrası kâr kalmıyor`};
+  if (a.alis_tavani) {
+    const p = a.alis_tavani / a.rakip_medyan;
+    return {c: p >= 0.25 ? "ok" : p >= 0.12 ? "warn" : "bad", t: `Toptancıdan ≤ ${tl(a.alis_tavani)} (KDV dahil) bulursan kârlı · piyasa ${tl(a.rakip_medyan)}`};
+  }
   const u = uyum(a);
   if (u != null && u > 1) return {c: u > 1.6 ? "bad" : "warn", t: `Kâr için ${tl(a.min_fiyat)} lazım, piyasa ${tl(a.rakip_medyan)}`};
   if (u != null) return {c: "ok", t: `Piyasa fiyatında kârlı (net ${yuzde(a.piyasa_marj, 0)})`};
@@ -38,6 +44,14 @@ const NEDEN_IK = {ok: `<svg viewBox="0 0 24 24" fill="none" stroke="var(--ok)" s
   bad: `<svg viewBox="0 0 24 24" fill="none" stroke="var(--bad)" stroke-width="2.4"><path d="M7 7l10 10M17 7 7 17"/></svg>`,
   info: `<svg viewBox="0 0 24 24" fill="none" stroke="var(--info)" stroke-width="2.4"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>`,
   gri: `<svg viewBox="0 0 24 24" fill="none" stroke="var(--soft)" stroke-width="2.4"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5V14M12 17h.01"/></svg>`};
+/* Alış payı çubuğu: piyasa fiyatının ne kadarı toptan alışa kalıyor (%20 net sonrası) */
+function tavanCubuk(a) {
+  if (!a.rakip_medyan || a.benzer_yok) return "";
+  const p = a.alis_tavani ? a.alis_tavani / a.rakip_medyan * 100 : 0;
+  const renk = p >= 25 ? "var(--ok)" : p >= 12 ? "var(--warn)" : "var(--bad)";
+  return `<div class="uyum" data-ipucu="Piyasa ${tl(a.rakip_medyan)} · toptancıdan en fazla ${a.alis_tavani ? tl(a.alis_tavani) : "0 TL"} (fiyatın %${p.toFixed(0)}'i) · kalanı kargo, koli, KDV, komisyon, reklam, iade ve %20 kâr">
+    <i style="width:${Math.max(p, 2)}%;background:${renk}"></i></div>`;
+}
 /* Fiyat uyum çubuğu: gereken fiyat ↔ piyasa medyanı (siyah çizgi) */
 function uyumCubuk(a) {
   if (!a.min_fiyat || !a.rakip_medyan) return "";
@@ -113,7 +127,7 @@ const yolCiz = parcalar => $("#yol").innerHTML = parcalar.map((p, i) => i === pa
 
 /* ---------------------------------------------------------------- yönlendirme */
 let OZET = null;
-window.addEventListener("hashchange", ciz);
+window.addEventListener("hashchange", () => { document.querySelectorAll(".modal-arka").forEach(m => m.remove()); ciz(); });   // sayfa değişince açık pencereler kapanır
 $$("[data-git]").forEach(b => b.onclick = () => location.hash = b.dataset.git);
 const git = h => location.hash = h;
 
@@ -147,7 +161,9 @@ async function ciz() {
 /* ---------------------------------------------------------------- ana sayfa */
 async function anaSayfa(ana) {
   yolCiz(["Ana sayfa"]);
-  const o = await ozetYukle();
+  const [o, sv] = await Promise.all([ozetYukle(), api("/api/sinyaller").catch(() => ({urunler: []}))]);
+  SINYALLER = sv.urunler;
+  const sinyal = SINYALLER.filter(u => u.karar && u.karar !== "ELE" && u.karar !== "EKSİK VERİ").slice(0, 4);
   const kd = o.karar_dagilimi, ap = o.apify, apY = ap.harcanan != null ? Math.min(100, ap.harcanan / ap.butce * 100) : 0;
   const saat = new Date().getHours(), selam = saat < 12 ? "Günaydın" : saat < 18 ? "İyi günler" : "İyi akşamlar";
   const dag = [["TESTE AL", kd["TESTE AL"]], ["İYİLEŞTİR", kd["İYİLEŞTİR"]], ["EKSİK VERİ", kd["EKSİK VERİ"]], ["ELE", kd["ELE"]]].filter(x => x[1]);
@@ -169,18 +185,21 @@ async function anaSayfa(ana) {
     <div class="kart kpi"><div class="e">Apify bütçesi</div><div class="d">$${(ap.harcanan ?? 0).toFixed(2)}<span class="soft" style="font-size:15px;font-weight:600"> / ${ap.butce}</span></div>
       <div class="gauge" style="margin-top:12px" data-ipucu="Bu ay harcanan: %${apY.toFixed(0)}"><i style="width:${apY}%;background:${apY > 80 ? "var(--bad)" : apY > 60 ? "var(--warn)" : "var(--ok)"}"></i></div></div>
   </div>
-  <div class="kart" style="margin-top:16px"><div class="kart-bas"><h3>En iyi adaylar</h3><button class="btn kucuk hayalet" onclick="git('kesif')">Tümü →</button></div>
+  <div class="kart" style="margin-top:16px"><div class="kart-bas"><h3>Yeni ürün sinyalleri</h3><span class="k soft">Amazon yeni çıkanlar → Türkiye doğrulaması</span><span class="ara"></span><button class="btn kucuk hayalet" onclick="git('sinyal')">Tümü →</button></div>
+    <div class="kart-ic">${sinyal.length ? `<div class="urunler">${sinyal.map(sinyalKart).join("")}</div>`
+      : `<div class="bos"><b>Henüz sinyal yok</b>Otomatik tarama Pazartesi ve Perşembe sabahı yeni ürün getirir.</div>`}</div></div>
+  <div class="kart" style="margin-top:16px"><div class="kart-bas"><h3>İncelenen ürünler</h3><button class="btn kucuk hayalet" onclick="git('kesif')">Tümü →</button></div>
     <div class="kart-ic">${enIyi.length ? `<div class="urunler">${enIyi.map(urunKart).join("")}</div>`
-      : `<div class="bos"><b>Henüz aday yok</b>Günlük tarama her sabah yeni ürün ekler.</div>`}</div></div>
+      : `<div class="bos"><b>Henüz aday yok</b>Bir sinyali projeye çevir ya da "+ Ürün incele".</div>`}</div></div>
   <div class="izgara g21" style="margin-top:16px">
     <div class="kart"><div class="kart-bas"><h3>Yapılacaklar</h3><span class="k soft">${o.gorevler.length}</span></div>
       <div style="margin-top:6px">${o.gorevler.length ? o.gorevler.slice(0, 6).map(gorevSatir).join("") :
         `<div class="bos" style="padding:28px"><b>Her şey yolunda</b>Bekleyen onay ya da adım yok.</div>`}</div></div>
-    <div class="kart"><div class="kart-bas"><h3>Günlük tarama</h3><button class="btn kucuk hayalet" onclick="git('tarama')">Yönet →</button></div>
+    <div class="kart"><div class="kart-bas"><h3>Otomatik tarama</h3><button class="btn kucuk hayalet" onclick="git('tarama')">Yönet →</button></div>
       <div class="kart-ic">
         <div class="liste-li"><span class="muted ara">Sonraki</span><b>${o.gorev ? tarih(o.gorev.sonraki) : "görev yok"}</b></div>
-        <div class="liste-li"><span class="muted ara">Son</span><b>${tarih(o.gunluk.son)}</b></div>
-        <div class="liste-li"><span class="muted ara">Sıradaki kelime</span><b class="tek" style="max-width:60%">${esc(o.gunluk.sonraki_kelime || "–")}</b></div>
+        <div class="liste-li"><span class="muted ara">Son</span><b>${tarih(o.sinyal?.son)}</b></div>
+        <div class="liste-li"><span class="muted ara">Sıradaki</span><b class="tek" style="max-width:60%">${esc((o.sinyal?.sonraki || []).join(", ") || "–")}</b></div>
       </div></div>
   </div>
   <div class="kart" style="margin-top:16px"><div class="kart-bas"><h3>Satış hattı</h3><button class="btn kucuk hayalet" onclick="git('projeler')">Pano →</button></div>
@@ -251,14 +270,15 @@ function urunKart(a) {
       <div class="baslik iki-satir">${esc(a.baslik)}</div>
       <div class="rakam">${miniHalka(a.puan)}
         <div><small>Piyasa</small><b>${a.benzer_yok ? "—" : tl(a.rakip_medyan)}</b></div>
-        <div><small>Gereken</small><b>${tl(a.min_fiyat)}</b></div></div>
-      ${uyumCubuk(a)}
+        <div><small>Alış tavanı</small><b style="color:${a.alis_tavani ? "var(--ok)" : "var(--soft)"}">${a.alis_tavani ? "≤ " + tl(a.alis_tavani) : "—"}</b></div></div>
+      ${tavanCubuk(a)}
+      ${a.yontem === "aliexpress" ? `<div class="k soft" data-ipucu="AliExpress'ten ithalat varsayımıyla bulundu; yerli toptancı fiyatı sorulmalı">eski yöntem · AliExpress</div>` : ""}
       <div class="neden">${NEDEN_IK[n.c] || NEDEN_IK.gri}<span>${esc(n.t)}</span></div>
       ${a.proje ? `<div><span class="rozet r-mor">proje: ${esc(a.proje)}</span></div>` : ""}
     </div></div>`;
 }
 function adayTablo(l, kisa = false) {
-  return `<table class="tablo"><thead><tr><th>Ürün</th><th>Karar</th><th class="sayi">Birim maliyet</th><th class="sayi">%20 marj için</th>
+  return `<table class="tablo"><thead><tr><th>Ürün</th><th>Karar</th><th class="sayi">Birim maliyet</th><th class="sayi">Alış tavanı</th>
     <th class="sayi">Piyasa medyanı</th><th>Fiyat uyumu</th>${kisa ? "" : "<th>Risk</th><th>Tarih</th>"}<th></th></tr></thead><tbody>
   ${l.map(a => {
     const u = uyum(a);
@@ -270,7 +290,7 @@ function adayTablo(l, kisa = false) {
         <div class="iki-satir" style="font-weight:550">${esc(a.baslik)}</div>
         <div class="k soft">${a.isaret === "favori" ? "★ favori · " : a.isaret === "red" ? "reddedildi · " : ""}${a.proje ? `<span class="rozet r-mor">proje: ${esc(a.proje)}</span>` : ""}</div></div></div></td>
       <td><div class="puan-c">${karar(a.karar)}${miniHalka(a.puan, 20, 34)}</div></td>
-      <td class="sayi">${tl(a.maliyet)}</td><td class="sayi"><b>${tl(a.min_fiyat)}</b></td><td class="sayi">${tl(a.rakip_medyan)}</td><td>${uy}</td>
+      <td class="sayi">${tl(a.maliyet)}${a.yontem === "aliexpress" ? `<div class="k soft">ithal</div>` : ""}</td><td class="sayi"><b>${a.alis_tavani ? "≤ " + tl(a.alis_tavani) : "—"}</b></td><td class="sayi">${tl(a.rakip_medyan)}</td><td>${uy}</td>
       ${kisa ? "" : `<td>${a.yuksek_risk ? `<span class="rozet r-bad">${a.yuksek_risk} yüksek risk</span>` : a.kargo_riski && a.kargo_riski !== "dusuk" ? `<span class="rozet ${RISK[a.kargo_riski][1]}">kargo ${RISK[a.kargo_riski][0].toLowerCase()}</span>` : `<span class="soft k">–</span>`}</td>
       <td class="k muted" style="white-space:nowrap">${tarih(a.tarih)}</td>`}
       <td style="text-align:right"><button class="btn kucuk hayalet" title="Favori" onclick="event.stopPropagation();isaretle('${a.id}','${a.isaret === "favori" ? "" : "favori"}')" style="color:${a.isaret === "favori" ? "var(--warn)" : "var(--soft)"}">${a.isaret === "favori" ? IK.yildizd : IK.yildiz}</button></td></tr>`;
@@ -434,43 +454,57 @@ function projeYap(a) {
 }
 
 /* ---------------------------------------------------------------- günlük tarama */
-let KELIMELER = null;
+let KATEGORILER = null;
 async function taramaSayfa(ana, sekme) {
-  yolCiz(["Ürün", "Günlük tarama"]);
-  sekme = sekme || "adaylar";
-  const [o, k] = await Promise.all([ozetYukle(), api("/api/kelimeler")]);
-  KELIMELER = k.liste.map(x => ({...x}));
-  const rapor = await api("/api/gunluk/" + (sekme === "liste" ? "adaylar" : sekme));
-  const gv = k.gorev;
+  yolCiz(["Ürün", "Otomatik tarama"]);
+  sekme = sekme || "calismalar";
+  const [o, k] = await Promise.all([ozetYukle(), api("/api/sinyal-kategoriler")]);
+  KATEGORILER = [...k.kategoriler];
+  const gv = k.gorev, ap = k.apify || {};
+  const katAd = x => k.secenekler[x] || x;
   ana.innerHTML = `
-  <div class="bas-sayfa"><div><h1>Günlük tarama</h1><p>Her sabah listedeki sıradaki kelimeyle AliExpress'te arar, alakalı en iyi 3 ürünü 20 puanlık kartla değerlendirir.</p></div>
+  <div class="bas-sayfa"><div><h1>Otomatik tarama</h1><p>Haftada iki kez (Pazartesi, Perşembe 09:00) Amazon'un yeni çıkanlarından 2 kategori tarar, Türkiye'de doğrular. Sonuçlar <a href="#sinyal">Ürün sinyali</a> sayfasına düşer.</p></div>
     <button class="btn ana" id="gB">Şimdi çalıştır</button></div>
   <div class="izgara g4">
-    <div class="kart kpi"><div class="e">Sonraki çalışma</div><div class="d" style="font-size:19px">${gv ? tarih(gv.sonraki) : "–"}</div><div class="a">${gv ? "Windows Görev Zamanlayıcı · bilgisayar kapalıysa açılınca" : "Görev bulunamadı"}</div></div>
-    <div class="kart kpi"><div class="e">Son çalışma</div><div class="d" style="font-size:19px">${tarih(k.son)}</div><div class="a">özet ve log: cikti/gunluk/</div></div>
-    <div class="kart kpi"><div class="e">Sıradaki kelime</div><div class="d tek" style="font-size:19px">${esc(k.liste[k.sira]?.en || "–")}</div><div class="a">${esc(k.liste[k.sira]?.tr || "")}</div></div>
-    <div class="kart kpi"><div class="e">Bütçe koruması</div><div class="d" style="font-size:19px">$${o.apify.gunluk_tavan} tavan</div><div class="a">Apify bu ay $${(o.apify.harcanan ?? 0).toFixed(2)}; tavan aşılırsa Trendyol atlanır</div></div>
+    <div class="kart kpi"><div class="e">Sonraki çalışma</div><div class="d" style="font-size:19px">${gv ? tarih(gv.sonraki) : "–"}</div><div class="a">${gv ? "Görev Zamanlayıcı · bilgisayar kapalıysa açılınca" : "Görev bulunamadı"}</div></div>
+    <div class="kart kpi"><div class="e">Son çalışma</div><div class="d" style="font-size:19px">${tarih(k.son)}</div><div class="a">log: cikti/sinyal/log.txt</div></div>
+    <div class="kart kpi"><div class="e">Sıradaki kategoriler</div><div class="d tek" style="font-size:19px">${k.sonraki.map(katAd).join(", ") || "–"}</div><div class="a">${k.kategoriler.length} kategori sırayla döner</div></div>
+    <div class="kart kpi"><div class="e">Bütçe koruması</div><div class="d" style="font-size:19px">$${ap.sinyal_tavan ?? 4} tavan</div><div class="a">Apify bu ay $${(ap.harcanan ?? 0).toFixed(2)} / $${ap.butce ?? 5} · çalışma başı ≈ $0,33</div></div>
   </div>
   <div class="kart" style="margin-top:14px"><div style="padding:0 18px"><div class="sekmeler" style="margin:6px 0 0">
-      <button class="sekme ${sekme === "adaylar" ? "aktif" : ""}" onclick="git('tarama/adaylar')">Biriken adaylar</button>
-      <button class="sekme ${sekme === "liste" ? "aktif" : ""}" onclick="git('tarama/liste')">Kelime listesi (${k.liste.length})</button>
-      ${o.gunluk.gunler.slice(0, 7).map(d => `<button class="sekme ${sekme === d ? "aktif" : ""}" onclick="git('tarama/${d}')">${new Date(d).toLocaleDateString("tr-TR", {day: "numeric", month: "short"})}</button>`).join("")}
-    </div></div>
-    <div id="tIc">${sekme === "liste" ? "" : `<div class="rapor">${md(rapor.md)}</div>`}</div></div>`;
-  if (sekme === "liste") kelimeCiz(k.sira);
-  $("#gB").onclick = async () => { try { isTakip(await post("/api/gunluk-calistir"), () => location.hash.startsWith("#tarama") && ciz()); bildir("Tarama başladı (5–10 dk)."); } catch (e) { bildir(e.message); } };
+      <button class="sekme ${sekme === "calismalar" ? "aktif" : ""}" onclick="git('tarama/calismalar')">Çalışmalar</button>
+      <button class="sekme ${sekme === "kategoriler" ? "aktif" : ""}" onclick="git('tarama/kategoriler')">Kategoriler (${k.kategoriler.length})</button>
+      <button class="sekme ${sekme === "eski" || /^\d{4}-/.test(sekme) ? "aktif" : ""}" onclick="git('tarama/eski')">Eski AliExpress raporları</button>
+    </div></div><div id="tIc"></div></div>`;
+  if (sekme === "kategoriler") kategoriCiz(k);
+  else if (sekme === "eski" || /^\d{4}-/.test(sekme)) {
+    const gun = sekme === "eski" ? "adaylar" : sekme;
+    const r = await api("/api/gunluk/" + gun);
+    $("#tIc").innerHTML = `<div class="kart-ic"><div class="not warn" style="margin-bottom:12px"><b>Eski yöntem</b>AliExpress'ten ithalat varsayımıyla yapılmış günlük taramalar. Artık çalışmıyor; sadece arşiv.</div>
+      <div class="flex" style="flex-wrap:wrap;gap:6px;margin-bottom:12px"><button class="btn kucuk ${gun === "adaylar" ? "ana" : ""}" onclick="git('tarama/eski')">Biriken adaylar</button>
+      ${o.gunluk.gunler.slice(0, 10).map(d => `<button class="btn kucuk ${gun === d ? "ana" : ""}" onclick="git('tarama/${d}')">${new Date(d).toLocaleDateString("tr-TR", {day: "numeric", month: "short"})}</button>`).join("")}</div>
+      <div class="rapor">${md(r.md)}</div></div>`;
+  } else {
+    $("#tIc").innerHTML = `<div class="kart-ic">${k.calismalar.length ? `<table class="tablo"><thead><tr><th>Zaman</th><th>Kategoriler</th><th style="text-align:right">Sinyal</th><th style="text-align:right">Olur</th><th>Not</th></tr></thead><tbody>
+      ${k.calismalar.map(c => `<tr onclick="git('sinyal')"><td>${tarih(c.zaman)}</td><td>${(c.kategoriler || []).map(katAd).join(", ")}</td><td style="text-align:right">${c.adet}</td>
+        <td style="text-align:right">${c.olur ? `<b style="color:var(--ok)">${c.olur}</b>` : "0"}</td><td class="k soft tek" style="max-width:280px">${esc((c.notlar || []).join(" · "))}</td></tr>`).join("")}</tbody></table>`
+      : `<div class="bos"><b>Henüz çalışma yok</b>"Şimdi çalıştır" ya da Pazartesi/Perşembe sabahını bekle.</div>`}</div>`;
+  }
+  $("#gB").onclick = async () => { try { isTakip(await post("/api/sinyal-calistir"), () => location.hash.startsWith("#tarama") && ciz()); bildir("Sinyal taraması başladı (5–10 dk)."); } catch (e) { bildir(e.message); } };
 }
-function kelimeCiz(sira) {
-  $("#tIc").innerHTML = `<div class="kart-ic"><div class="not bilgi" style="margin-bottom:12px">AliExpress'te İngilizce kelime daha iyi sonuç verir; Türkçe kelime Trendyol ve Google Trends için kullanılır.
-    Sağlık vaadi gerektiren ürün kategorilerinden (korse, zayıflama vb.) kaçın.</div>
-    <table class="tablo"><thead><tr><th style="width:40px">#</th><th>AliExpress araması (İngilizce)</th><th>Türkçe pazar kelimesi</th><th></th></tr></thead><tbody>
-    ${KELIMELER.map((x, i) => `<tr style="cursor:default"><td class="k ${i === sira ? "" : "muted"}">${i === sira ? `<span class="rozet r-acc">sıradaki</span>` : i + 1}</td>
-      <td><input data-i="${i}" data-a="en" value="${esc(x.en)}"></td><td><input data-i="${i}" data-a="tr" value="${esc(x.tr)}"></td>
-      <td style="width:50px"><button class="btn kucuk hayalet" onclick="KELIMELER.splice(${i},1);kelimeCiz(${sira})">✕</button></td></tr>`).join("")}</tbody></table>
-    <div class="flex" style="margin-top:12px"><button class="btn" onclick="KELIMELER.push({en:'',tr:''});kelimeCiz(${sira})">+ Kelime ekle</button><span class="ara"></span>
-      <button class="btn ana" id="kK">Listeyi kaydet</button></div></div>`;
-  $$("#tIc input[data-i]").forEach(i => i.oninput = () => KELIMELER[+i.dataset.i][i.dataset.a] = i.value);
-  $("#kK").onclick = async () => { try { await post("/api/kelimeler", {liste: KELIMELER}, "PUT"); bildir("Kelime listesi kaydedildi."); ciz(); } catch (e) { bildir(e.message); } };
+function kategoriCiz(k) {
+  const katAd = x => k.secenekler[x] || x;
+  const ekle = Object.keys(k.secenekler).filter(x => !KATEGORILER.includes(x));
+  $("#tIc").innerHTML = `<div class="kart-ic"><div class="not bilgi" style="margin-bottom:12px">Her çalışmada sıradaki 2 kategori taranır. Mert Kurtul: giyim, takı, ayakkabı, gıda ve sarf ürünlerinden uzak dur; elektronikte faturasız ürün riski var.</div>
+    ${KATEGORILER.map((x, i) => `<div class="liste-li"><span class="k ${i === k.sira ? "" : "muted"}" style="width:70px">${i === k.sira ? `<span class="rozet r-acc">sıradaki</span>` : i + 1}</span>
+      <span class="ara"><b>${esc(katAd(x))}</b> <span class="k soft">${esc(x)}</span></span>
+      <button class="btn kucuk hayalet" ${i ? "" : "disabled"} onclick="KATEGORILER.splice(${i - 1},0,KATEGORILER.splice(${i},1)[0]);kategoriCiz(KAT_VERI)">↑</button>
+      <button class="btn kucuk hayalet" onclick="KATEGORILER.splice(${i},1);kategoriCiz(KAT_VERI)">✕</button></div>`).join("")}
+    <div class="flex" style="margin-top:12px">${ekle.length ? `<select id="kEk"><option value="">+ Kategori ekle</option>${ekle.map(x => `<option value="${x}">${esc(katAd(x))}</option>`).join("")}</select>` : ""}<span class="ara"></span>
+      <button class="btn ana" id="kK">Kaydet</button></div></div>`;
+  window.KAT_VERI = k;
+  const s = $("#kEk"); if (s) s.onchange = () => { if (s.value) { KATEGORILER.push(s.value); kategoriCiz(k); } };
+  $("#kK").onclick = async () => { try { await post("/api/sinyal-kategoriler", {liste: KATEGORILER}, "PUT"); bildir("Kategori listesi kaydedildi."); ciz(); } catch (e) { bildir(e.message); } };
 }
 
 /* ---------------------------------------------------------------- projeler (pano) */
@@ -511,7 +545,7 @@ async function projeSayfa(ana, ad, ps) {
     <div style="flex:1;min-width:240px">
       <div class="flex sarma" style="gap:8px"><h2>${esc(p.marka || p.ad)}</h2>${karar(p.karar)}<span class="k muted">${p.puan ?? "–"}/20</span>
         <span class="rozet r-mor">${esc(asamaAd || "")}</span>${p.zorla ? `<span class="rozet r-gri">deneme projesi</span>` : ""}</div>
-      <div class="k muted tek">${esc(p.baslik)} · <a href="${esc(p.urun.link)}" target="_blank" rel="noopener">AliExpress ↗</a></div>
+      <div class="k muted tek">${esc(p.baslik)} · <a href="${esc(p.urun.link)}" target="_blank" rel="noopener">${/amazon\./.test(p.urun.link || "") ? "Amazon" : /tiktok/.test(p.urun.link || "") ? "TikTok" : /trendyol/.test(p.urun.link || "") ? "Trendyol" : "AliExpress"} ↗</a></div>
       <div class="metrik">
         <div><small>Satış fiyatı</small><b>${tl(f.fiyat)}</b></div><div><small>Birim net kâr</small><b>${tl(f.birim_kar)}</b></div>
         <div><small>Net marj</small><b style="color:${f.marj_yuzde >= 20 ? "var(--ok)" : "var(--warn)"}">${yuzde(f.marj_yuzde)}</b></div>
@@ -551,6 +585,7 @@ async function detayCiz() {
   if (a.durum === "onay_bekliyor") eylem += `<button class="btn yesil" onclick="onayla('${a.anahtar}')">Onayla</button>`;
   if (a.durum === "onaylandi") eylem += `<button class="btn" onclick="onayGeri('${a.anahtar}')">Onayı geri al</button>`;
   if (calisabilir) eylem += `<button class="btn ${a.durum === "hazir" ? "ana" : ""}" onclick="calistir(['${a.anahtar}'])">${a.durum === "hazir" ? "Çalıştır" : "Yeniden üret"}</button>`;
+  if (a.anahtar === "tedarik") eylem += `<button class="btn" onclick="toptanciModal()">Toptancı kartı${PROJE.secimler.toptanci_ad ? " ✓" : ""}</button>`;
   if (a.anahtar === "magaza" && a.rapor) eylem += `<button class="btn" onclick="shopifyTaslak()">Shopify'a taslak gönder</button>`;
   if (a.anahtar === "analiz" && a.durum !== "kilitli") eylem += `<label class="btn ana" style="margin:0">CSV yükle ve analiz et<input type="file" accept=".csv" hidden onchange="csvYukle(this)"></label>`;
   const sek = [["rapor", "Rapor"]];
@@ -707,6 +742,23 @@ async function csvYukle(inp) {
   const fd = new FormData(); fd.append("dosya", inp.files[0]);
   try { const is = await api(`/api/proje/${encodeURIComponent(PROJE.ad)}/analiz`, {method: "POST", body: fd}); isTakip(is, () => ciz()); bildir("Analiz çalışıyor."); }
   catch (e) { bildir(e.message); }
+}
+function toptanciModal() {
+  const s = PROJE.secimler;
+  const alan = (k, ad, ipucu, tip = "text") => `<div class="alan"><label class="e">${ad}</label><input data-k="${k}" type="${tip}" value="${esc(s[k] ?? "")}" placeholder="${esc(ipucu)}"></div>`;
+  const sec = (k, ad, sec) => `<div class="alan"><label class="e">${ad}</label><select data-k="${k}"><option value="">—</option>${sec.map(([v, t]) => `<option value="${v}" ${s[k] === v ? "selected" : ""}>${t}</option>`).join("")}</select></div>`;
+  const m = modal(`<h3>Toptancı kartı</h3><p class="k muted" style="margin-top:0">Görüştüğün toptancının bilgileri. Fiyatı girince maliyet ve kâr gerçek fiyatla yeniden hesaplanır. Bilgiler sadece bu bilgisayarda kalır.</p>
+    <div class="izgara g2" style="gap:12px">${alan("toptanci_ad", "Toptancı / üretici", "ör. Yıldız Toptan")}${alan("toptanci_tel", "Telefon / WhatsApp", "05xx…")}</div>
+    <div class="izgara g2" style="gap:12px">${sec("tedarik_tipi", "Tür", [["yerli", "Yerli toptancı"], ["uretim", "Türkiye'de üretim"], ["ithal", "İthalat"]])}${alan("tedarik_fiyati", "Birim alış (KDV dahil TL)", "ör. 150", "number")}</div>
+    <div class="izgara g2" style="gap:12px">${alan("moq", "Minimum adet", "ör. 50", "number")}${alan("teslim_gun", "Kargoya veriş (gün)", "ör. 2", "number")}</div>
+    <div class="izgara g2" style="gap:12px">${sec("fatura", "Fatura", [["var", "Var"], ["yok", "Yok"]])}${sec("dropship", "Tek tek gönderim", [["evet", "Evet"], ["hayir", "Hayır"]])}</div>
+    ${alan("toptanci_not", "Not", "ör. 100 adette %10 indirim, numune 2 günde")}
+    ${s.fatura === "yok" ? `<div class="not warn"><b>Faturasız alım</b>KDV mahsubu yapılamaz, iade/garanti zorlaşır.</div>` : ""}
+    <div class="flex" style="margin-top:8px;justify-content:flex-end"><button class="btn" data-kapat>Vazgeç</button><button class="btn ana" id="tkB">Kaydet</button></div>`);
+  $("#tkB", m).onclick = async () => {
+    const v = {}; $$("[data-k]", m).forEach(i => v[i.dataset.k] = i.value.trim());
+    try { await post(`/api/proje/${encodeURIComponent(PROJE.ad)}/sec`, v); m.remove(); bildir("Kaydedildi. Tedarik raporunu yeniden üretirsen kart rapora da girer."); ciz(); } catch (e) { bildir(e.message, 5000); }
+  };
 }
 function ayarModal() {
   const s = PROJE.secimler;
@@ -877,7 +929,6 @@ function gorselHata(img) {
 
 
 /* ---------------------------------------------------------------- ürün sinyali (Amazon yeni çıkanlar → Türkiye doğrulaması) */
-let SINYALLER = [];
 async function sinyalSayfa(ana) {
   yolCiz(["Ürün", "Ürün sinyali"]);
   await ozetYukle();
@@ -896,7 +947,8 @@ async function sinyalSayfa(ana) {
   ${SINYALLER.length ? `<div class="urunler">${SINYALLER.map(sinyalKart).join("")}</div>`
     : `<div class="kart bos"><b>Henüz sinyal yok</b>"Yeni sinyal çek" Amazon'un yeni çıkanlar listesinden 2 kategori tarar (~0,30 $).</div>`}
   <div class="k soft" style="margin-top:16px">Yöntem: Mert Kurtul · Amazon filtresi puan ≥ 3,5 · fiyat 6–100 $ · yorum ≤ 1000 · güçlü rakip = Trendyol'da 100+ yorum (≤5 uygun, ≥10 doymuş) · alış tavanı: Trendyol medyanında %20 net kâr, yerli tedarik, KDV dahil</div>`;
-  $("#sB").onclick = async () => { try { isTakip(await post("/api/sinyal-calistir"), () => location.hash.startsWith("#sinyal") && ciz()); bildir("Sinyal taraması başladı (5–10 dk)."); } catch (e) { bildir(e.message); } };
+  const calis = async tt => { try { isTakip(await post("/api/sinyal-calistir" + (tt ? "?tiktok=true" : "")), () => location.hash.startsWith("#sinyal") && ciz()); bildir("Sinyal taraması başladı (5–10 dk)."); } catch (e) { bildir(e.message); } };
+  $("#sB").onclick = () => calis(false);
 }
 function doygunlukCubuk(dg) {
   if (!dg) return `<div class="k soft">Trendyol'da aynısı yok</div>`;
@@ -914,7 +966,7 @@ function sinyalKart(u, i) {
       <div><div class="baslik iki-satir" style="min-height:0">${esc((u.tr_kelime || "").replace(/^./, c => c.toLocaleUpperCase("tr")))}</div>
         <div class="k soft tek">${esc(u.urun_turu || "")}</div></div>
       <div class="rakam" style="grid-template-columns:1fr 1fr 1fr">
-        <div><small>Amazon</small><b>${u.price != null ? "$" + u.price : "–"}</b></div>
+        <div><small>${u._source === "tiktok" ? "TikTok" : "Amazon"}</small><b>${u.price != null ? "$" + u.price : "–"}</b></div>
         <div><small>TR piyasa</small><b>${t.medyan ? tl(t.medyan) : "—"}</b></div>
         <div><small>Alış tavanı</small><b style="color:${u.alis_tavani ? "var(--ok)" : "var(--soft)"}">${u.alis_tavani ? "≤ " + tl(u.alis_tavani) : "—"}</b></div></div>
       ${t.benzer != null ? doygunlukCubuk(t.doygunluk) : `<div class="k soft">Trendyol doğrulaması bekliyor</div>`}
@@ -922,17 +974,21 @@ function sinyalKart(u, i) {
       <div class="neden">${NEDEN_IK[n] || NEDEN_IK.gri}<span>${esc(u.neden || "")}</span></div>
     </div></div>`;
 }
+async function sinyalProje(asin) {
+  try { const r = await post("/api/sinyal-json/" + encodeURIComponent(asin)); projeYap(r); }
+  catch (e) { bildir(e.message, 6000); }
+}
 function sinyalAc(i) {
   const u = SINYALLER[i], t = u.trendyol || {};
   cekmece(`<div class="c-bas"><img src="${esc(u.imageUrl || "")}" style="object-fit:contain;background:#fff" referrerpolicy="no-referrer" onerror="gorselHata(this)">
       <div class="ara">${karar(u.karar)}<div style="font-weight:650;margin-top:6px">${esc(u.tr_kelime)}</div>
         <div class="k muted iki-satir">${esc(u.title)}</div>
-        <div class="k"><a href="${esc(u.productUrl)}" target="_blank" rel="noopener">Amazon'da aç ↗</a> · ${esc(u.kategori)} · #${u.rank} yeni çıkan</div></div>
+        <div class="k"><a href="${esc(u.productUrl)}" target="_blank" rel="noopener">${u._source === "tiktok" ? "TikTok Shop'ta aç" : "Amazon'da aç"} ↗</a> · ${esc(u.kategori)} · ${u._source === "tiktok" ? `7 günde gelir ${u.tt_buyume != null ? (u.tt_buyume > 0 ? "+" : "") + Math.round(u.tt_buyume) + "%" : "–"}` : `#${u.rank} yeni çıkan`}</div></div>
       <button class="btn hayalet" onclick="cekmeceKapat()" style="align-self:flex-start">✕</button></div>
     <div class="c-ic" style="padding-top:18px">
       <div class="hukum ${{"TESTE AL": "ok", "İYİLEŞTİR": "warn", "ELE": "bad"}[u.karar] || "gri"}"><div><h3>${esc(u.neden)}</h3></div></div>
       <div class="sinyal">
-        <div><small>Amazon</small><b>${u.price != null ? "$" + u.price : "–"}</b><div class="durum soft">${u.rating ?? "–"}★ · ${sayi(u.reviewCount)} yorum</div></div>
+        <div><small>${u._source === "tiktok" ? "TikTok Shop (ABD)" : "Amazon"}</small><b>${u.price != null ? "$" + u.price : "–"}</b><div class="durum soft">${u._source === "tiktok" ? `${sayi(u.tt_satis)} satış / 7 gün` : `${u.rating ?? "–"}★ · ${sayi(u.reviewCount)} yorum`}</div></div>
         <div><small>Trendyol medyanı</small><b>${t.medyan ? tl(t.medyan) : "—"}</b><div class="durum soft">${t.benzer ?? 0} benzer / ${t.sonuc ?? 0} sonuç</div></div>
         <div><small>Toptan alış tavanı</small><b>${u.alis_tavani ? "≤ " + tl(u.alis_tavani) : "—"}</b><div class="durum soft">KDV dahil, %20 net için</div></div>
       </div>
@@ -945,7 +1001,8 @@ function sinyalAc(i) {
       <div class="liste-li"><b style="min-width:90px">Problem</b><span>${esc(u.problem || "")}</span></div>
       ${(u.acilar || []).length ? `<h4 style="margin:18px 0 6px">Pazarlama açıları (${u.acilar.length})</h4>${u.acilar.map(x => `<div class="liste-li">🎯 ${esc(x)}</div>`).join("")}` : ""}
       ${(t.ornekler || []).length ? `<details class="ac" open><summary>Trendyol'daki benzerler</summary><div class="ic">${t.ornekler.map(x => `<div class="liste-li"><a class="ara tek" href="${esc(x.link)}" target="_blank" rel="noopener">${esc(x.ad)}</a><b>${tl(x.fiyat)}</b><span class="soft k" style="width:90px;text-align:right">${sayi(x.degerlendirme)} yorum</span></div>`).join("")}</div></details>` : ""}
-      <div class="not bilgi" style="margin-top:14px"><b>Sonraki adım</b>Trendyol'da satıcının mesafeli satış sözleşmesinden telefonuna ulaş, toptan fiyat iste ya da Türkiye'de ürettirme seçeneğine bak. Fiyat alış tavanının altındaysa ürünü incele ve projeye çevir.</div>
+      <div class="not bilgi" style="margin-top:14px"><b>Sonraki adım</b>Projeye çevir: tedarik adımı Trendyol satıcılarının telefonunu nasıl bulacağını, toptancıya ne soracağını yazar. Toptan fiyatı girince kâr gerçek fiyatla yeniden hesaplanır.</div>
+      ${u.karar && u.karar !== "EKSİK VERİ" ? `<div class="flex" style="margin-top:14px;justify-content:flex-end"><button class="btn ana" onclick="sinyalProje('${esc(u.asin)}')">Projeye çevir</button></div>` : ""}
     </div>`);
 }
 

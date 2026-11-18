@@ -12,7 +12,9 @@ Akış:
  5. Meta Reklam Kütüphanesi (TR): farklı reklamveren ≥ 20 → doymuş, 8–19 → kalabalık (reklam_kutuphanesi.py, ücretsiz)
  6. Ters hesap: Trendyol medyanında %20 net kâr için toptancıdan en fazla kaça (KDV dahil) alınmalı
 Karar: Olur (uygun pazar + kârlı alış tavanı) · Belki (kalabalık / Türkiye'de yok / tavan çok düşük) · Olmaz (doymuş)
-Bütçe: aylık Apify harcaması SINYAL_APIFY_TAVAN_USD'yi (3 $) geçerse çalışmaz.
+Bütçe: aylık Apify harcaması SINYAL_APIFY_TAVAN_USD'yi (4 $; toplam 5 $) geçerse çalışmaz.
+Otomatik: sinyal_calistir.cmd (Görev Zamanlayıcı, Pzt ve Per 09:00) → 2 kategori × 30 ürün, 3 doğrulama ≈ 0,33 $/çalışma
+≈ 3 $/ay; tavan dolunca kendiliğinden durur.
 """
 from __future__ import annotations
 
@@ -40,7 +42,14 @@ KLASOR = KOK / "cikti" / "sinyal"
 KATEGORI_DOSYA = KOK / "sinyal-kategoriler.txt"
 DURUM = KLASOR / "durum.json"
 AKTOR = "fanndev/amazon-bestsellers-movers-tracker"
-APIFY_TAVAN = float(os.getenv("SINYAL_APIFY_TAVAN_USD", "3"))
+# İsteğe bağlı ikinci kaynak: TikTok Shop (ABD) son 7 günde geliri en hızlı artanlar (~0,003 $/ürün, kaynak başına en az 25 ürün).
+# DİKKAT (2026-11-18 denendi): Apify ÜCRETSİZ planında bu aktör veri vermiyor (sadece "free-plan" uyarısı, 0,005 $ başlangıç ücreti);
+# ücretli Apify planında çalışır. Ücretsiz alternatifler giriş çerezi (doliz) ya da residential proxy (datapeak, bovi) istiyor → kullanılmadı.
+TT_AKTOR = "lergassy/tiktok-shop-top-products-scraper"
+TT_KATEGORI = {"pet-supplies": "Pet Supplies", "kitchen": "Kitchenware", "home-garden": "Home Supplies", "baby-products": "Baby & Maternity",
+               "office-products": "Office Supplies", "automotive": "Automotive & Motorcycle", "sporting-goods": "Sports & Outdoor",
+               "hi": "Tools & Hardware", "toys-and-games": "Toys & Hobbies", "garden": "Home Supplies"}
+APIFY_TAVAN = float(os.getenv("SINYAL_APIFY_TAVAN_USD", "4"))
 USD_TL = float(os.getenv("USD_TL", "41"))     # yalnızca Amazon fiyatını fikir olsun diye TL'ye çevirmek için
 
 SEC_SISTEM = (
@@ -101,6 +110,37 @@ def _amazon_cek(kategori: str, adet: int) -> list[dict]:
     return [x for x in c.dataset(ds).iterate_items() if not x.get("_error")]
 
 
+def tiktok_yukselen(kategori: str, adet: int = 25) -> list[dict]:
+    """TikTok Shop ABD: kategoride son 7 günde gelir artışı en yüksek ürünler (aynı gün önbellekten). Satır biçimi Amazon kaydına uydurulur."""
+    ad = TT_KATEGORI.get(kategori)
+    if not ad:
+        return []
+    onbellek = KLASOR / f"tiktok-{kategori}-{dt.date.today():%Y%m%d}.json"
+    if onbellek.exists():
+        return json.loads(onbellek.read_text(encoding="utf-8"))
+    from apify_client import ApifyClient
+    adet = max(25, adet)
+    c = ApifyClient(os.environ["APIFY_TOKEN"])
+    run = c.actor(TT_AKTOR).call(run_input={"categories": [ad], "country": "US", "period": "last7Day", "sortBy": "revenueGrowth",
+                                             "maxResultsPerSource": adet, "minPrice": 6, "maxPrice": 100, "addAnalytics": False},
+                                 max_total_charge_usd=Decimal(str(round(adet * 0.0035 + 0.02, 2))), run_timeout=timedelta(minutes=6), logger=None)
+    ds = run["defaultDatasetId"] if isinstance(run, dict) else run.default_dataset_id
+    out, uyari = [], None
+    for x in c.dataset(ds).iterate_items():
+        if x.get("type") == "notice" and x.get("kind") == "free-plan":
+            uyari = "Apify ücretsiz planında TikTok Shop verisi gelmiyor (ücretli plan gerekir)"
+        if x.get("type") != "product" or not x.get("productId"):
+            continue
+        out.append({"asin": f"TT{x['productId']}", "title": x.get("title"), "price": x.get("avgSellingPrice"), "rating": None,
+                    "reviewCount": x.get("reviewCount"), "imageUrl": x.get("image") or x.get("imageUrl"), "productUrl": x.get("url"),
+                    "_source": "tiktok", "tt_buyume": x.get("revenueGrowthPercent"), "tt_satis": x.get("unitsSold"),
+                    "tt_gelir": x.get("revenue"), "tt_video_gelir": x.get("videoRevenue"), "rank": x.get("rank")})
+    if not out and uyari:
+        raise RuntimeError(uyari)
+    onbellek.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
+    return out
+
+
 def mert_filtre(u: dict) -> tuple[bool, str]:
     p, r, y = u.get("price"), u.get("rating"), u.get("reviewCount")
     if r is not None and r < 3.5:
@@ -113,11 +153,15 @@ def mert_filtre(u: dict) -> tuple[bool, str]:
 
 
 def sec(urunler: list[dict], kategori: str) -> list[dict]:
-    istem = "\n".join([f"Amazon '{kategori}' kategorisinde YENİ ÇIKAN ve satış sıralamasında yükselen ürünler:", ""]
-                      + [f"{i}. {(u.get('title') or '')[:160]} | {u.get('price')} $ | {u.get('rating')}★ | {u.get('reviewCount')} yorum"
-                         for i, u in enumerate(urunler, 1)]
+    def satir(i, u):
+        if u.get("_source") == "tiktok":
+            return (f"{i}. [TikTok Shop ABD] {(u.get('title') or '')[:160]} | {u.get('price')} $ | 7 günde gelir artışı %{u.get('tt_buyume')} | "
+                    f"{u.get('tt_satis')} satış")
+        return f"{i}. [Amazon yeni çıkan] {(u.get('title') or '')[:160]} | {u.get('price')} $ | {u.get('rating')}★ | {u.get('reviewCount')} yorum"
+    istem = "\n".join([f"'{kategori}' kategorisinde YENİ ÇIKAN / satışı hızla yükselen ürünler (Amazon ve TikTok Shop):", ""]
+                      + [satir(i, u) for i, u in enumerate(urunler, 1)]
                       + ["", "Kurallara uyan en fazla 6 ürünü seç (uymayanı seçme, hiçbiri uymuyorsa boş liste)."])
-    g = gemini.json_sor(istem, SEC_SEMA, sistem=SEC_SISTEM, sicaklik=0.2)
+    g = gemini.json_sor(istem, SEC_SEMA, sistem=SEC_SISTEM, sicaklik=0.2, toplu=True)
     import riskler
     out = []
     for s in g.get("secilenler") or []:
@@ -140,24 +184,13 @@ def benzerleri(aday: dict, rk: dict) -> list[dict]:
                       + [f"{i}. {x.get('ad')} | {x.get('fiyat')} TL" for i, x in enumerate(liste, 1)]
                       + ["", "Hangileri bizim ürünle AYNI tür ve işlevde? (aksesuar, yedek parça, başka ürün değil) Numaraları ver."])
     try:
-        g = gemini.json_sor(istem, ESLE_SEMA, sicaklik=0.0)
+        g = gemini.json_sor(istem, ESLE_SEMA, sicaklik=0.0, toplu=True)
     except Exception:  # noqa: BLE001
         return []
     return [liste[i - 1] for i in sorted({int(i) for i in g.get("benzer") or []}) if 1 <= i <= len(liste)]
 
 
-def alis_tavani(satis_tl: float, a: dict) -> float | None:
-    """Trendyol medyanında satınca %20 net kâr bırakan en yüksek KDV dahil toptan alış fiyatı (yerli tedarik)."""
-    lo, hi = 0.0, satis_tl
-    if hesap.fiyat_analizi(satis_tl, hesap.birim_maliyet(0, 0, "yerli", a), a)["marj_yuzde"] < a["hedef_marj"] * 100:
-        return None
-    for _ in range(40):
-        m = (lo + hi) / 2
-        if hesap.fiyat_analizi(satis_tl, hesap.birim_maliyet(m, 0, "yerli", a), a)["marj_yuzde"] >= a["hedef_marj"] * 100:
-            lo = m
-        else:
-            hi = m
-    return round(lo, 0)
+alis_tavani = hesap.alis_tavani
 
 
 def karar(dg: dict | None, benzer: int, tavan: float | None, medyan: float | None) -> tuple[str, str]:
@@ -190,6 +223,13 @@ def calistir(args) -> int:
             ham = amazon_yeni(kat, args.adet)
         except Exception as e:  # noqa: BLE001
             notlar.append(f"{kat}: Amazon listesi alınamadı ({type(e).__name__}: {str(e)[:120]})"); continue
+        if args.tiktok:
+            try:
+                tt = tiktok_yukselen(kat, args.tiktok_adet)
+                print(f"  TikTok Shop: {len(tt)} ürün")
+                ham = ham + tt
+            except Exception as e:  # noqa: BLE001
+                notlar.append(f"{kat}: TikTok listesi alınamadı ({type(e).__name__}: {str(e)[:120]})")
         uygun = [u for u in ham if mert_filtre(u)[0] and u.get("asin") not in d["gorulen"]]
         print(f"  {len(ham)} ürün, Mert filtresinden {len(uygun)} geçti")
         if not uygun:
@@ -207,7 +247,7 @@ def calistir(args) -> int:
     sonuc.sort(key=lambda u: (u.get("reviewCount") or 0))
     for u in sonuc[: args.dogrula]:
         print(f"› Trendyol: {u['tr_kelime']}")
-        rk = rakipler.trendyol(u["tr_kelime"], adet=30)
+        rk = rakipler.trendyol(u["tr_kelime"], adet=args.trendyol_adet)
         if rk.get("hata"):
             notlar.append(f"{u['tr_kelime']}: {rk['hata']}"); continue
         b = benzerleri(u, rk)
@@ -275,6 +315,9 @@ def main():
     p.add_argument("--adet", type=int, default=40, help="kategori başına Amazon ürünü (≈0,003 $/ürün)")
     p.add_argument("--dogrula", type=int, default=4, help="Trendyol'da doğrulanacak aday sayısı (≈0,05 $/aday)")
     p.add_argument("--reklam-yok", action="store_true", help="Meta Reklam Kütüphanesi kontrolünü atla")
+    p.add_argument("--trendyol-adet", type=int, default=24, help="aday başına okunacak Trendyol sonucu (≈0,002 $/sonuç)")
+    p.add_argument("--tiktok", action="store_true", help="TikTok Shop (ABD) yükselenlerini de ekle (~0,08 $/kategori; ücretli Apify planı gerekir)")
+    p.add_argument("--tiktok-adet", type=int, default=25, help="kategori başına TikTok ürünü (en az 25)")
     sys.exit(calistir(p.parse_args()))
 
 
