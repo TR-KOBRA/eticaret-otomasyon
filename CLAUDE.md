@@ -36,6 +36,7 @@ AliExpress araması İngilizce, Trends/Trendyol Türkçe kelimeyle daha iyi çal
 Gemini metin modeli: `gemini-3.5-flash` (`gemini-flash-latest` ve `gemini-3.8-flash` 60 sn+ takılıyordu, 2.5 kapalı).
 Trendyol yorumlu çalıştırma pahalı: ürün başına 15 yorum ≈ 0,37 $ çıktı → 4'e indirildi.
 Panel: `panel/sunucu.py` (FastAPI, 127.0.0.1:8765) + `panel/index.html`, `app.js`, `app.css` (derlemesiz). Komutları CLI'lar üzerinden çalıştırır;
+Panel tasarımı: açık tema varsayılan (koyu seçilebilir), karar dili "Olur / Belki / Olmaz" (TESTE AL / İYİLEŞTİR / ELE), önce hüküm + tek cümle neden, ayrıntı açılır bölümlerde; grafikler dataviz kuralları (ince işaret, 2px boşluk, ipucu).
 `--gonder` panelde yok. Favori/red işaretleri `panel/veri.json`, iş logları `panel/isler/` (git dışı).
 Günlük tarama: `urun-arastirma/gunluk.py` (Görev Zamanlayıcı "Eticaret Gunluk Urun Taramasi", 09:00), kelimeler `gunluk-kelimeler.txt`.
 Rakip kıyası: rakip_analiz `benzer_rakipler` → `rakipler.benzer_rakip` (aynı tür ürünler; <3 ise benzer_yok). Günlük taramada alaka (baş kelime + Gemini) ve ön eleme (`--on-eleme-kat`).

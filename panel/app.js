@@ -10,8 +10,65 @@ const tarih = s => s ? new Date(s).toLocaleString("tr-TR", {day: "numeric", mont
 const gun = s => s ? new Date(s).toLocaleDateString("tr-TR", {day: "numeric", month: "long", weekday: "long"}) : "–";
 const md = t => { try { return DOMPurify.sanitize(marked.parse(t || "")); } catch (e) { return `<pre>${esc(t)}</pre>`; } };
 const json = o => esc(JSON.stringify(o));
-const KARAR = {"TESTE AL": "r-ok", "İYİLEŞTİR": "r-warn", "ELE": "r-bad", "EKSİK VERİ": "r-gri"};
-const karar = k => k ? `<span class="rozet ${KARAR[k] || "r-gri"}">${esc(k)}</span>` : "";
+/* Karar dili: kullanıcıya "Olur / Belki / Olmaz" — içteki adlar (TESTE AL…) sadece ipucunda */
+const KARAR = {"TESTE AL": {ad: "Olur", c: "ok", i: "✓"}, "İYİLEŞTİR": {ad: "Belki", c: "warn", i: "~"},
+               "ELE": {ad: "Olmaz", c: "bad", i: "✕"}, "EKSİK VERİ": {ad: "Veri eksik", c: "gri", i: "?"}};
+const karar = (k, buyuk = false) => { const x = KARAR[k]; return x ? `<span class="karar ${x.c} ${buyuk ? "buyuk" : ""}" data-ipucu="Sistem kararı: ${esc(k)}"><i>${x.i}</i>${x.ad}</span>` : ""; };
+const kararRenk = k => ({ok: "var(--ok)", warn: "var(--warn)", bad: "var(--bad)", gri: "var(--soft)"})[(KARAR[k] || {}).c || "gri"];
+function miniHalka(p, en = 20, boy = 42) {
+  const r = boy / 2 - 4, c = 2 * Math.PI * r, o = Math.max(0, Math.min(1, (p || 0) / en));
+  const renk = p >= 15 ? "var(--ok)" : p >= 10 ? "var(--warn)" : "var(--bad)";
+  return `<div class="mini-halka" style="width:${boy}px;height:${boy}px" data-ipucu="20 puanlık skor kartı: ${p ?? "–"}/20">
+    <svg viewBox="0 0 ${boy} ${boy}" width="${boy}" height="${boy}"><circle cx="${boy / 2}" cy="${boy / 2}" r="${r}" fill="none" stroke="var(--line)" stroke-width="4"/>
+    <circle cx="${boy / 2}" cy="${boy / 2}" r="${r}" fill="none" stroke="${renk}" stroke-width="4" stroke-linecap="round" stroke-dasharray="${c * o} ${c}" transform="rotate(-90 ${boy / 2} ${boy / 2})"/></svg>
+    <b>${p ?? "–"}</b></div>`;
+}
+/* Tek cümlelik neden: kullanıcı kartta sadece bunu okur */
+function neden(a) {
+  if (a.yuksek_risk) return {c: "bad", t: `${a.yuksek_risk} yüksek risk (marka, sağlık ya da kargo)`};
+  if (a.karar === "EKSİK VERİ") return {c: "gri", t: "Yapay zekâ puanlayamadı, yeniden puanla"};
+  if (a.benzer_yok) return {c: "info", t: "Trendyol'da aynısı yok: fiyat doğrulanamadı"};
+  const u = uyum(a);
+  if (u != null && u > 1) return {c: u > 1.6 ? "bad" : "warn", t: `Kâr için ${tl(a.min_fiyat)} lazım, piyasa ${tl(a.rakip_medyan)}`};
+  if (u != null) return {c: "ok", t: `Piyasa fiyatında kârlı (net ${yuzde(a.piyasa_marj, 0)})`};
+  return {c: "gri", t: "Rakip fiyatı yok"};
+}
+const NEDEN_IK = {ok: `<svg viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2.4"><path d="M5 12l5 5 9-10"/></svg>`,
+  warn: `<svg viewBox="0 0 24 24" fill="none" stroke="var(--warn)" stroke-width="2.4"><path d="M12 8v5M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg>`,
+  bad: `<svg viewBox="0 0 24 24" fill="none" stroke="var(--bad)" stroke-width="2.4"><path d="M7 7l10 10M17 7 7 17"/></svg>`,
+  info: `<svg viewBox="0 0 24 24" fill="none" stroke="var(--info)" stroke-width="2.4"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>`,
+  gri: `<svg viewBox="0 0 24 24" fill="none" stroke="var(--soft)" stroke-width="2.4"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5V14M12 17h.01"/></svg>`};
+/* Fiyat uyum çubuğu: gereken fiyat ↔ piyasa medyanı (siyah çizgi) */
+function uyumCubuk(a) {
+  if (!a.min_fiyat || !a.rakip_medyan) return "";
+  const ust = Math.max(a.min_fiyat, a.rakip_medyan) * 1.12, x = v => Math.min(100, v / ust * 100);
+  const renk = a.min_fiyat <= a.rakip_medyan ? "var(--ok)" : a.min_fiyat / a.rakip_medyan > 1.6 ? "var(--bad)" : "var(--warn)";
+  return `<div class="uyum" data-ipucu="Turuncu/yeşil: %20 kâr için gereken fiyat ${tl(a.min_fiyat)} · çizgi: piyasa medyanı ${tl(a.rakip_medyan)}">
+    <i style="width:${x(a.min_fiyat)}%;background:${renk}"></i><span class="medyan" style="left:${x(a.rakip_medyan)}%"></span></div>`;
+}
+/* Basit ipucu katmanı: data-ipucu taşıyan her öğe */
+(() => {
+  let el = null;
+  document.addEventListener("mouseover", e => {
+    const h = e.target.closest("[data-ipucu]"); if (!h) return;
+    el = el || Object.assign(document.createElement("div"), {className: "ipucu"}); document.body.append(el);
+    el.textContent = h.dataset.ipucu; el.hidden = false;
+  });
+  document.addEventListener("mousemove", e => { if (el && !el.hidden) { el.style.left = Math.min(innerWidth - 270, e.clientX + 14) + "px"; el.style.top = (e.clientY + 16) + "px"; } });
+  document.addEventListener("mouseout", e => { if (el && e.target.closest("[data-ipucu]") && !e.relatedTarget?.closest?.("[data-ipucu]")) el.hidden = true; });
+})();
+/* Tema seçici */
+function temaYaz() {
+  const t = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+  document.querySelectorAll("[data-tema]").forEach(b => b.classList.toggle("aktif", b.dataset.tema === t));
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-tema]"); if (!b) return;
+  if (b.dataset.tema === "dark") document.documentElement.dataset.theme = "dark"; else delete document.documentElement.dataset.theme;
+  try { localStorage.setItem("tema", b.dataset.tema); } catch (er) {}
+  temaYaz();
+});
+temaYaz();
 const DURUM = {tamam: ["Tamam", "r-ok"], onaylandi: ["Onaylandı", "r-ok"], onay_bekliyor: ["Onay bekliyor", "r-warn"], hazir: ["Çalıştırılabilir", "r-info"], kilitli: ["Sırada", "r-gri"]};
 const RISK = {yuksek: ["Yüksek", "r-bad"], orta: ["Orta", "r-warn"], dusuk: ["Düşük", "r-ok"], bilgi: ["Bilgi", "r-gri"]};
 const IK = {
@@ -73,6 +130,7 @@ async function ozetYukle() {
 }
 
 async function ciz() {
+  cekmeceKapat();                       // sayfa değişince açık ürün paneli kapansın
   const [sayfa, arg, arg2] = (location.hash.slice(1) || "ana").split("/");
   $$(".men").forEach(m => m.classList.toggle("aktif", m.dataset.git === sayfa || (sayfa === "proje" && m.dataset.proje === arg)));
   const ana = $("#ana");
@@ -91,35 +149,43 @@ async function anaSayfa(ana) {
   yolCiz(["Ana sayfa"]);
   const o = await ozetYukle();
   const kd = o.karar_dagilimi, ap = o.apify, apY = ap.harcanan != null ? Math.min(100, ap.harcanan / ap.butce * 100) : 0;
+  const saat = new Date().getHours(), selam = saat < 12 ? "Günaydın" : saat < 18 ? "İyi günler" : "İyi akşamlar";
+  const dag = [["TESTE AL", kd["TESTE AL"]], ["İYİLEŞTİR", kd["İYİLEŞTİR"]], ["EKSİK VERİ", kd["EKSİK VERİ"]], ["ELE", kd["ELE"]]].filter(x => x[1]);
+  const top = dag.reduce((t, x) => t + x[1], 0) || 1;
+  const onay = o.gorevler.filter(g => g.tur === "onay").length;
+  const enIyi = [...o.adaylar].sort((x, y) => (y.puan ?? 0) - (x.puan ?? 0)).slice(0, 4);
   const asamaSay = Object.fromEntries(o.asamalar.map(([k]) => [k, o.projeler.filter(p => p.asama === k)]));
   ana.innerHTML = `
-  <div class="bas-sayfa"><div><h1>Merhaba 👋</h1><p>${gun(new Date())} · ${o.gorevler.length ? `<b>${o.gorevler.length}</b> iş seni bekliyor` : "Bekleyen iş yok"}</p></div>
-    <div class="flex"><button class="btn" onclick="git('tarama')">Günlük tarama</button><button class="btn ana" onclick="yeniArastirma()">+ Yeni ürün incele</button></div></div>
+  <div class="bas-sayfa"><div><h1>${selam}</h1><p>${gun(new Date())} · ${o.gorevler.length ? `<b style="color:var(--text)">${o.gorevler.length} iş</b> seni bekliyor` : "bekleyen iş yok"}</p></div>
+    <button class="btn ana" onclick="yeniArastirma()">+ Ürün incele</button></div>
   <div class="izgara g4">
-    <div class="kart kpi"><div class="e">Aktif proje</div><div class="d">${o.projeler.length}</div><div class="a">${o.projeler.filter(p => p.asama === "test" || p.asama === "olcek").length} tanesi reklamda (test/ölçek)</div></div>
-    <div class="kart kpi"><div class="e">Onay bekleyen</div><div class="d" style="color:${o.gorevler.filter(g => g.tur === "onay").length ? "var(--warn)" : "inherit"}">${o.gorevler.filter(g => g.tur === "onay").length}</div><div class="a">numune, marka, görsel, kreatif</div></div>
     <div class="kart kpi"><div class="e">Aday havuzu</div><div class="d">${o.arastirma_sayisi}</div>
-      <div class="a">${kd["TESTE AL"]} teste al · ${kd["İYİLEŞTİR"]} iyileştir · ${kd["ELE"]} ele</div></div>
-    <div class="kart kpi"><div class="e">Apify bu ay</div><div class="d">${ap.harcanan != null ? "$" + ap.harcanan.toFixed(2) : "–"}<span class="soft" style="font-size:15px;font-weight:600"> / $${ap.butce}</span></div>
-      <div class="gauge" style="margin-top:8px"><i style="width:${apY}%;background:${apY > 80 ? "var(--bad)" : apY > 60 ? "var(--warn)" : "var(--ok)"}"></i></div></div>
+      <div class="yigin ince" style="margin-top:12px">${dag.map(([k, n]) => `<i style="width:${n / top * 100}%;background:${kararRenk(k)}" data-ipucu="${KARAR[k].ad}: ${n} ürün"></i>`).join("")}</div>
+      <div class="lejant" style="margin-top:8px">${dag.map(([k, n]) => `<span><i style="background:${kararRenk(k)}"></i>${KARAR[k].ad} ${n}</span>`).join("")}</div></div>
+    <div class="kart kpi"><div class="e">“Olur” çıkan ürün</div><div class="d" style="color:${kd["TESTE AL"] ? "var(--ok)" : "inherit"}">${kd["TESTE AL"]}</div>
+      <div class="a">${kd["TESTE AL"] ? "teste hazır, projeye çevir" : "henüz yok · toptan fiyat gerekiyor"}</div></div>
+    <div class="kart kpi"><div class="e">Aktif proje</div><div class="d">${o.projeler.length}</div>
+      <div class="a">${onay ? `<span style="color:var(--warn);font-weight:600">${onay} onay bekliyor</span>` : "onay bekleyen yok"}</div></div>
+    <div class="kart kpi"><div class="e">Apify bütçesi</div><div class="d">$${(ap.harcanan ?? 0).toFixed(2)}<span class="soft" style="font-size:15px;font-weight:600"> / ${ap.butce}</span></div>
+      <div class="gauge" style="margin-top:12px" data-ipucu="Bu ay harcanan: %${apY.toFixed(0)}"><i style="width:${apY}%;background:${apY > 80 ? "var(--bad)" : apY > 60 ? "var(--warn)" : "var(--ok)"}"></i></div></div>
   </div>
-  <div class="izgara g21" style="margin-top:14px">
-    <div class="kart"><div class="kart-bas"><h3>Yapılacaklar</h3><span class="k muted">${o.gorevler.length} iş</span></div>
-      <div style="margin-top:8px">${o.gorevler.length ? o.gorevler.slice(0, 8).map(gorevSatir).join("") :
-        `<div class="bos"><b>Her şey yolunda</b>Yeni bir ürün incele ya da günlük taramanın sonuçlarına bak.</div>`}</div></div>
-    <div class="kart"><div class="kart-bas"><h3>Günlük tarama</h3><button class="btn kucuk" onclick="git('tarama')">Yönet</button></div>
+  <div class="kart" style="margin-top:16px"><div class="kart-bas"><h3>En iyi adaylar</h3><button class="btn kucuk hayalet" onclick="git('kesif')">Tümü →</button></div>
+    <div class="kart-ic">${enIyi.length ? `<div class="urunler">${enIyi.map(urunKart).join("")}</div>`
+      : `<div class="bos"><b>Henüz aday yok</b>Günlük tarama her sabah yeni ürün ekler.</div>`}</div></div>
+  <div class="izgara g21" style="margin-top:16px">
+    <div class="kart"><div class="kart-bas"><h3>Yapılacaklar</h3><span class="k soft">${o.gorevler.length}</span></div>
+      <div style="margin-top:6px">${o.gorevler.length ? o.gorevler.slice(0, 6).map(gorevSatir).join("") :
+        `<div class="bos" style="padding:28px"><b>Her şey yolunda</b>Bekleyen onay ya da adım yok.</div>`}</div></div>
+    <div class="kart"><div class="kart-bas"><h3>Günlük tarama</h3><button class="btn kucuk hayalet" onclick="git('tarama')">Yönet →</button></div>
       <div class="kart-ic">
-        <div class="liste-li"><span class="muted ara">Sonraki çalışma</span><b>${o.gorev ? tarih(o.gorev.sonraki) : "görev yok"}</b></div>
-        <div class="liste-li"><span class="muted ara">Son çalışma</span><b>${tarih(o.gunluk.son)}</b></div>
-        <div class="liste-li"><span class="muted ara">Sıradaki kelime</span><b class="tek" style="max-width:55%">${esc(o.gunluk.sonraki_kelime || "–")}</b></div>
-        <div class="liste-li"><span class="muted ara">Kelime listesi</span><b>${o.gunluk.kelime_sayisi}</b></div>
+        <div class="liste-li"><span class="muted ara">Sonraki</span><b>${o.gorev ? tarih(o.gorev.sonraki) : "görev yok"}</b></div>
+        <div class="liste-li"><span class="muted ara">Son</span><b>${tarih(o.gunluk.son)}</b></div>
+        <div class="liste-li"><span class="muted ara">Sıradaki kelime</span><b class="tek" style="max-width:60%">${esc(o.gunluk.sonraki_kelime || "–")}</b></div>
       </div></div>
   </div>
-  <div class="kart" style="margin-top:14px"><div class="kart-bas"><h3>Satış hattı</h3><button class="btn kucuk" onclick="git('projeler')">Panoyu aç</button></div>
-    <div class="kart-ic"><div class="mini-hat">${o.asamalar.map(([k, ad]) => `<div class="a"><b>${asamaSay[k].length}</b><span>${ad}</span>
-      ${asamaSay[k].slice(0, 2).map(p => `<div class="k tek" style="margin-top:4px;cursor:pointer" onclick="git('proje/${esc(p.ad)}')">↳ ${esc(p.marka || p.ad)}</div>`).join("")}</div>`).join("")}</div></div></div>
-  <div class="kart" style="margin-top:14px"><div class="kart-bas"><h3>Öne çıkan adaylar</h3><button class="btn kucuk" onclick="git('kesif')">Tüm adaylar</button></div>
-    <div class="kart-ic">${o.adaylar.length ? adayTablo(o.adaylar, true) : `<div class="bos"><b>Henüz aday yok</b>Günlük tarama her sabah yeni ürünler ekler.</div>`}</div></div>`;
+  <div class="kart" style="margin-top:16px"><div class="kart-bas"><h3>Satış hattı</h3><button class="btn kucuk hayalet" onclick="git('projeler')">Pano →</button></div>
+    <div class="kart-ic"><div class="hat">${o.asamalar.map(([k, ad]) => `<div class="a ${asamaSay[k].length ? "dolu" : ""}"><div class="y">${asamaSay[k].length}</div><span>${ad}</span>
+      ${asamaSay[k].slice(0, 1).map(p => `<div class="p tek" onclick="git('proje/${esc(p.ad)}')">${esc(p.marka || p.ad)}</div>`).join("")}</div>`).join("")}</div></div></div>`;
 }
 function gorevSatir(g) {
   const ayar = {onay: ["r-warn", IK.onay, `git('proje/${g.proje}')`, "Kontrol et"], hazir: ["r-info", IK.oynat, `git('proje/${g.proje}')`, "Aç"],
@@ -132,32 +198,37 @@ function gorevSatir(g) {
 /* ---------------------------------------------------------------- ürün keşfi */
 const FILTRE = {karar: "hepsi", ara: "", sira: "tarih", fav: false, red: false};
 let ADAYLAR = [];
+let GORUNUM = "kart";
+try { GORUNUM = localStorage.getItem("kesifGorunum") || "kart"; } catch (e) {}
 async function kesifSayfa(ana) {
   yolCiz(["Ürün", "Ürün keşfi"]);
   await ozetYukle();
   ADAYLAR = await api("/api/arastirmalar");
+  const say = k => ADAYLAR.filter(a => a.karar === k && a.isaret !== "red").length;
   ana.innerHTML = `
-  <div class="bas-sayfa"><div><h1>Ürün keşfi</h1><p>İncelenen tüm ürünler: maliyet, %20 marj için gereken fiyat, Trendyol piyasası ve 20 puanlık skor.</p></div>
+  <div class="bas-sayfa"><div><h1>Ürün keşfi</h1><p>${ADAYLAR.length} ürün incelendi · ${say("TESTE AL")} olur, ${say("İYİLEŞTİR")} belki</p></div>
     <button class="btn ana" onclick="yeniArastirma()">+ Ürün incele</button></div>
-  <div class="kart">
-    <div class="kart-ic flex sarma" style="gap:8px;border-bottom:1px solid var(--line)">
-      <div style="position:relative;flex:1;min-width:200px;max-width:340px"><input id="fAra" placeholder="Ürün ara…" value="${esc(FILTRE.ara)}" style="padding-left:32px">
-        <span style="position:absolute;left:10px;top:9px;width:15px;color:var(--soft)">${IK.ara}</span></div>
-      ${["hepsi", "TESTE AL", "İYİLEŞTİR", "EKSİK VERİ", "ELE"].map(k => `<button class="cip ${FILTRE.karar === k ? "aktif" : ""}" data-karar="${k}">${k === "hepsi" ? "Tümü" : k}
-        <span class="soft" style="margin-left:5px">${k === "hepsi" ? ADAYLAR.length : ADAYLAR.filter(a => a.karar === k).length}</span></button>`).join("")}
-      <span class="ara"></span>
-      <label class="kutu-sec"><input type="checkbox" id="fFav" ${FILTRE.fav ? "checked" : ""}> Favoriler</label>
-      <label class="kutu-sec"><input type="checkbox" id="fRed" ${FILTRE.red ? "checked" : ""}> Reddedilenler</label>
-      <select id="fSira" style="width:auto"><option value="tarih">En yeni</option><option value="puan">Puan</option><option value="marj">Piyasa marjı</option><option value="uyum">Fiyat uyumu</option></select>
-    </div>
-    <div class="tablo-k" id="adayTablo"></div>
-  </div>`;
-  $("#fSira").value = FILTRE.sira;
+  <div class="flex sarma" style="gap:8px;margin-bottom:16px">
+    <div style="position:relative;flex:1;min-width:200px;max-width:320px"><input id="fAra" placeholder="Ürün ara…" value="${esc(FILTRE.ara)}" style="padding-left:34px">
+      <span style="position:absolute;left:11px;top:10px;width:15px;color:var(--soft)">${IK.ara}</span></div>
+    ${["hepsi", "TESTE AL", "İYİLEŞTİR", "EKSİK VERİ", "ELE"].map(k => `<button class="cip ${FILTRE.karar === k ? "aktif" : ""}" data-karar="${k}">
+      ${k === "hepsi" ? "Tümü" : `<span class="nokta" style="color:${kararRenk(k)}"></span>${KARAR[k].ad}`}
+      <span style="opacity:.6">${k === "hepsi" ? ADAYLAR.length : ADAYLAR.filter(a => a.karar === k).length}</span></button>`).join("")}
+    <span class="ara"></span>
+    <button class="cip ${FILTRE.fav ? "aktif" : ""}" id="fFav">★ Favoriler</button>
+    <select id="fSira" style="width:auto"><option value="tarih">En yeni</option><option value="puan">En yüksek puan</option><option value="uyum">Piyasaya en yakın</option></select>
+    <div class="segment"><button data-gor="kart" class="${GORUNUM === "kart" ? "aktif" : ""}" data-ipucu="Kart görünümü"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></button>
+      <button data-gor="tablo" class="${GORUNUM === "tablo" ? "aktif" : ""}" data-ipucu="Tablo görünümü"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg></button></div>
+  </div>
+  <div id="adayTablo"></div>
+  <div class="k soft" style="margin-top:14px"><label class="kutu-sec" style="display:inline-flex"><input type="checkbox" id="fRed" ${FILTRE.red ? "checked" : ""}> Reddettiklerimi de göster</label></div>`;
+  $("#fSira").value = FILTRE.sira === "marj" ? "uyum" : FILTRE.sira;
   $("#fAra").oninput = e => { FILTRE.ara = e.target.value; adayTabloCiz(); };
   $$("[data-karar]").forEach(b => b.onclick = () => { FILTRE.karar = b.dataset.karar; kesifSayfa(ana); });
-  $("#fFav").onchange = e => { FILTRE.fav = e.target.checked; adayTabloCiz(); };
+  $("#fFav").onclick = () => { FILTRE.fav = !FILTRE.fav; kesifSayfa(ana); };
   $("#fRed").onchange = e => { FILTRE.red = e.target.checked; adayTabloCiz(); };
   $("#fSira").onchange = e => { FILTRE.sira = e.target.value; adayTabloCiz(); };
+  $$("[data-gor]").forEach(b => b.onclick = () => { GORUNUM = b.dataset.gor; try { localStorage.setItem("kesifGorunum", GORUNUM); } catch (e) {} kesifSayfa(ana); });
   adayTabloCiz();
 }
 const uyum = a => a.min_fiyat && a.rakip_medyan ? a.min_fiyat / a.rakip_medyan : null;
@@ -167,7 +238,24 @@ function adayTabloCiz() {
     && (!FILTRE.fav || a.isaret === "favori") && (FILTRE.red ? true : a.isaret !== "red"));
   const s = {puan: a => -(a.puan ?? -1), marj: a => -(a.piyasa_marj ?? -999), uyum: a => uyum(a) ?? 99, tarih: a => -new Date(a.tarih || 0)}[FILTRE.sira];
   l = l.sort((x, y) => s(x) - s(y));
-  $("#adayTablo").innerHTML = l.length ? adayTablo(l) : `<div class="bos"><b>Eşleşen ürün yok</b>Filtreleri değiştir ya da yeni bir ürün incele.</div>`;
+  $("#adayTablo").innerHTML = !l.length ? `<div class="kart bos"><b>Eşleşen ürün yok</b>Filtreleri değiştir ya da yeni bir ürün incele.</div>`
+    : GORUNUM === "tablo" ? `<div class="kart tablo-k">${adayTablo(l)}</div>` : `<div class="urunler">${l.map(urunKart).join("")}</div>`;
+}
+function urunKart(a) {
+  const n = neden(a);
+  return `<div class="uk" onclick="adayAc('${esc(a.json)}')">
+    <div class="gorsel"><img src="${esc(a.gorsel || "")}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="gorselHata(this)">${karar(a.karar)}
+      <button class="yildiz ${a.isaret === "favori" ? "on" : ""}" data-ipucu="${a.isaret === "favori" ? "Favoriden çıkar" : "Favorilere ekle"}"
+        onclick="event.stopPropagation();isaretle('${a.id}','${a.isaret === "favori" ? "" : "favori"}')">${a.isaret === "favori" ? IK.yildizd : IK.yildiz}</button></div>
+    <div class="govde">
+      <div class="baslik iki-satir">${esc(a.baslik)}</div>
+      <div class="rakam">${miniHalka(a.puan)}
+        <div><small>Piyasa</small><b>${a.benzer_yok ? "—" : tl(a.rakip_medyan)}</b></div>
+        <div><small>Gereken</small><b>${tl(a.min_fiyat)}</b></div></div>
+      ${uyumCubuk(a)}
+      <div class="neden">${NEDEN_IK[n.c] || NEDEN_IK.gri}<span>${esc(n.t)}</span></div>
+      ${a.proje ? `<div><span class="rozet r-mor">proje: ${esc(a.proje)}</span></div>` : ""}
+    </div></div>`;
 }
 function adayTablo(l, kisa = false) {
   return `<table class="tablo"><thead><tr><th>Ürün</th><th>Karar</th><th class="sayi">Birim maliyet</th><th class="sayi">%20 marj için</th>
@@ -178,10 +266,10 @@ function adayTablo(l, kisa = false) {
       : u == null ? `<span class="rozet r-gri">Rakip verisi yok</span>` : u <= 1 ? `<span class="rozet r-ok">Piyasaya uygun</span>`
       : `<span class="rozet ${u <= 1.3 ? "r-warn" : "r-bad"}">Piyasanın ${yuzde((u - 1) * 100, 0)} üstü</span>`;
     return `<tr onclick="adayAc('${esc(a.json)}')">
-      <td><div class="urun-h"><img src="${esc(a.gorsel || "")}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"><div style="min-width:0">
+      <td><div class="urun-h"><img src="${esc(a.gorsel || "")}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="gorselHata(this)"><div style="min-width:0">
         <div class="iki-satir" style="font-weight:550">${esc(a.baslik)}</div>
         <div class="k soft">${a.isaret === "favori" ? "★ favori · " : a.isaret === "red" ? "reddedildi · " : ""}${a.proje ? `<span class="rozet r-mor">proje: ${esc(a.proje)}</span>` : ""}</div></div></div></td>
-      <td><div class="puan-c">${karar(a.karar)}<span class="k muted say">${a.puan ?? "–"}/20</span></div></td>
+      <td><div class="puan-c">${karar(a.karar)}${miniHalka(a.puan, 20, 34)}</div></td>
       <td class="sayi">${tl(a.maliyet)}</td><td class="sayi"><b>${tl(a.min_fiyat)}</b></td><td class="sayi">${tl(a.rakip_medyan)}</td><td>${uy}</td>
       ${kisa ? "" : `<td>${a.yuksek_risk ? `<span class="rozet r-bad">${a.yuksek_risk} yüksek risk</span>` : a.kargo_riski && a.kargo_riski !== "dusuk" ? `<span class="rozet ${RISK[a.kargo_riski][1]}">kargo ${RISK[a.kargo_riski][0].toLowerCase()}</span>` : `<span class="soft k">–</span>`}</td>
       <td class="k muted" style="white-space:nowrap">${tarih(a.tarih)}</td>`}
@@ -203,10 +291,10 @@ async function adayAc(ad) {
 }
 function adayCiz() {
   const a = ADAY, c = $(".cekmece"); if (!c) return;
-  const tab = [["ozet", "Skor"], ["fiyat", "Fiyat & kâr"], ["pazar", "Pazar & rakip"], ["risk", `Riskler${a.riskler?.length ? ` (${a.riskler.length})` : ""}`]];
+  const tab = [["ozet", "Özet"], ["fiyat", "Fiyat & kâr"], ["pazar", "Pazar"], ["risk", `Riskler${a.riskler?.length ? ` (${a.riskler.length})` : ""}`]];
   c.innerHTML = `
-  <div class="c-bas"><img src="${esc(a.gorsel || "")}" alt="" onerror="this.style.visibility='hidden'">
-    <div class="ara"><div class="flex sarma" style="gap:6px">${karar(a.karar)}<span class="k muted">${a.puan}/20</span>${a.proje ? `<span class="rozet r-mor">proje: ${esc(a.proje)}</span>` : ""}${a.isaret === "red" ? `<span class="rozet r-bad">reddedildi</span>` : ""}</div>
+  <div class="c-bas"><img src="${esc(a.gorsel || "")}" alt="" referrerpolicy="no-referrer" onerror="gorselHata(this)">
+    <div class="ara"><div class="flex sarma" style="gap:6px">${a.proje ? `<span class="rozet r-mor">proje: ${esc(a.proje)}</span>` : ""}${a.isaret === "red" ? `<span class="rozet r-bad">reddedildi</span>` : ""}${a.isaret === "favori" ? `<span class="rozet r-warn">★ favori</span>` : ""}</div>
       <div style="font-weight:650;margin-top:4px" class="iki-satir">${esc(a.baslik)}</div>
       <div class="k muted"><a href="${esc(a.link)}" target="_blank" rel="noopener">AliExpress'te aç ↗</a> · ${tarih(a.tarih)}</div></div>
     <button class="btn hayalet" onclick="cekmeceKapat()" style="align-self:flex-start">✕</button></div>
@@ -232,15 +320,36 @@ function halka(p, en = 20) {
     <circle cx="46" cy="46" r="${r}" fill="none" stroke="${renk}" stroke-width="8" stroke-linecap="round" stroke-dasharray="${c * o} ${c}" transform="rotate(-90 46 46)"/></svg><b>${p ?? "–"}</b></div>`;
 }
 function adayOzet(a) {
-  const sk = a.skor || {};
-  return `<div class="flex" style="gap:18px;align-items:center">${halka(sk.toplam)}<div>
-      <div style="font-weight:650;font-size:15px">${esc(sk.karar)} · ${sk.toplam}/20</div>
-      <div class="k muted">15+ teste al · 10–14 iyileştir · 0–9 ele. Yüksek risk ya da piyasa fiyatında kâr yoksa teste alınmaz.</div></div></div>
-    ${(sk.kirmizi_bayraklar || []).length ? `<div class="not warn" style="margin-top:14px"><b>Dikkat</b>${sk.kirmizi_bayraklar.map(esc).join("<br>")}</div>` : ""}
-    <div style="margin-top:12px">${(sk.kriterler || []).map(k => `<div class="kriter"><b style="font-size:13px">${esc(k.ad)}</b>
+  const sk = a.skor || {}, n = neden(a), x = KARAR[a.karar] || KARAR["EKSİK VERİ"];
+  const BASLIK = {ok: "Bu ürüne girilebilir", warn: "Şartlı: önce düzeltilmesi gereken var", bad: "Bu haliyle girme", gri: "Karar için veri eksik"};
+  const kr = Object.fromEntries((sk.kriterler || []).map(k => [k.kod, k]));
+  const durum = p => p == null ? ["gri", "?"] : p >= 2 ? ["ok", "İyi"] : p === 1 ? ["warn", "Orta"] : ["bad", "Zayıf"];
+  const sinyal = (ad, kod, deger) => { const [c, t] = durum(kr[kod]?.puan);
+    return `<div data-ipucu="${esc(kr[kod]?.gerekce || "")}"><small>${ad}</small><b>${deger}</b><div class="durum" style="color:var(--${c === "gri" ? "soft" : c})">● ${t}</div></div>`; };
+  return `<div class="hukum ${x.c}">${miniHalka(sk.toplam, 20, 64)}<div>${karar(a.karar, true)}
+      <h3 style="margin-top:8px">${BASLIK[x.c]}</h3><div class="k" style="color:var(--muted)">${esc(n.t)}</div></div></div>
+    <div class="sinyal">
+      ${sinyal("Kâr", "kar_marji", a.benzer_yok ? "doğrulanamadı" : a.piyasa_marj != null ? "net " + yuzde(a.piyasa_marj, 0) : "—")}
+      ${sinyal("Problem çözüyor", "net_problem", (kr.net_problem?.puan ?? "–") + "/2")}
+      ${sinyal("Videoda anlatılır", "video_anlatim", (kr.video_anlatim?.puan ?? "–") + "/2")}
+    </div>
+    ${a.rakip_medyan || a.benzer_yok ? `<div style="margin-top:16px">${adayBant(a)}</div>` : ""}
+    ${(() => { const bay = (sk.kirmizi_bayraklar || []).filter(x => !(a.benzer_yok && /aynı ürün/i.test(x)));
+      return bay.length ? `<div class="not warn" style="margin-top:14px"><b>Dikkat</b>${bay.slice(0, 3).map(esc).join("<br>")}</div>` : ""; })()}
+    <details class="ac"><summary>20 puanın dağılımı</summary><div class="ic">${(sk.kriterler || []).map(k => `<div class="kriter"><b style="font-size:13px;font-weight:600">${esc(k.ad)}</b>
       <div class="bar">${[0, 1].map(i => `<i class="${k.puan == null ? "" : k.puan > i ? (k.puan === 1 ? "y" : "d") : ""}"></i>`).join("")}<span class="k muted" style="width:26px;text-align:right">${k.puan ?? "?"}/2</span></div>
-      <small>${esc(k.gerekce || "")}${k.kaynak ? ` <span class="soft">· ${esc(k.kaynak)}</span>` : ""}</small></div>`).join("")}</div>
-    ${(sk.hooklar || []).length ? `<h4 style="margin:18px 0 6px">Reklam kancası fikirleri</h4>${sk.hooklar.map(h => `<div class="liste-li">💬 ${esc(typeof h === "string" ? h : h.metin || JSON.stringify(h))}</div>`).join("")}` : ""}`;
+      <small>${esc(k.gerekce || "")}</small></div>`).join("")}</div></details>
+    ${(sk.hook_ornekleri || sk.hooklar || []).length ? `<details class="ac"><summary>Reklam kancası fikirleri</summary><div class="ic">${(sk.hook_ornekleri || sk.hooklar).map(h => `<div class="liste-li">💬 ${esc(typeof h === "string" ? h : h.metin || JSON.stringify(h))}</div>`).join("")}</div></details>` : ""}`;
+}
+function adayBant(a) {
+  const rk = a.rakip_ozet || {};
+  if (!rk.medyan) return a.benzer_yok ? `<div class="not bilgi"><b>Trendyol'da aynı ürün yok</b>Aramada çıkanlar başka türden. Pazar boşluğu da olabilir, talep yokluğu da.</div>` : "";
+  const ust = Math.max(rk.max, a.min_fiyat || 0) * 1.05, x = v => Math.max(0, Math.min(100, v / ust * 100));
+  return `<div class="k muted" style="font-weight:600">Trendyol fiyat aralığı <span class="soft">· ${esc(rk.kapsam || rk.urun_sayisi + " ürün")}</span></div>
+    <div class="bant"><div class="serit"></div><div class="ceyrek" style="left:${x(rk.alt_ceyrek)}%;width:${x(rk.ust_ceyrek) - x(rk.alt_ceyrek)}%" data-ipucu="Rakiplerin ortadaki yarısı: ${tl(rk.alt_ceyrek)} – ${tl(rk.ust_ceyrek)}"></div>
+      <div class="im" style="left:${x(rk.medyan)}%"><span style="${etk(x(rk.medyan))}">piyasa ${tl(rk.medyan)}</span></div>
+      ${a.min_fiyat ? `<div class="im biz" style="left:${x(a.min_fiyat)}%"><span style="${etk(x(a.min_fiyat))}">bize gereken ${tl(a.min_fiyat)}</span></div>` : ""}
+      <span class="uc" style="left:0">${tl(rk.min)}</span><span class="uc" style="right:0">${tl(rk.max)}</span></div>`;
 }
 const etk = p => p > 75 ? "left:auto;right:0;transform:none" : p < 25 ? "left:0;transform:none" : "";
 function adayFiyat(a) {
@@ -249,6 +358,8 @@ function adayFiyat(a) {
   const rk = a.rakip_ozet || {};
   let bant = "";
   if (rk.medyan) {
+    bant = `<div style="margin-top:20px">${adayBant(a)}</div>`;
+  } else if (false) {
     const ust = Math.max(rk.max, a.min_fiyat || 0) * 1.05, x = v => Math.max(0, Math.min(100, v / ust * 100));
     bant = `<div class="kart-ic" style="padding:0"><h4 style="margin:18px 0 0">Trendyol fiyat aralığı (${rk.kapsam || rk.urun_sayisi + " ürün"})</h4>
       <div class="bant"><div class="serit"></div><div class="ceyrek" style="left:${x(rk.alt_ceyrek)}%;width:${x(rk.ust_ceyrek) - x(rk.alt_ceyrek)}%"></div>
@@ -371,7 +482,7 @@ async function projelerSayfa(ana) {
     <button class="btn" onclick="git('kesif')">Adaylardan proje aç</button></div>
   ${o.projeler.length ? `<div class="kanban">${o.asamalar.map(([k, ad]) => { const l = o.projeler.filter(p => p.asama === k);
     return `<div class="sutun"><h4><span>${ad}</span><span>${l.length}</span></h4>${l.map(p => `
-      <div class="pk" onclick="git('proje/${esc(p.ad)}')"><div class="ust"><img src="${esc(p.gorsel || "")}" alt="" onerror="this.style.visibility='hidden'">
+      <div class="pk" onclick="git('proje/${esc(p.ad)}')"><div class="ust"><img src="${esc(p.gorsel || "")}" alt="" referrerpolicy="no-referrer" onerror="gorselHata(this)">
         <div style="min-width:0"><b class="tek" style="display:block">${esc(p.marka || p.ad)}</b><div class="k muted">${p.ilerleme}/${p.toplam_adim} adım</div></div></div>
         <div class="adim-nokta" style="margin-top:10px">${p.adimlar.map(a => `<i class="${a.durum}"></i>`).join("")}</div>
         <div class="flex sarma" style="gap:5px;margin-top:9px">${karar(p.karar)}${p.zorla ? `<span class="rozet r-gri">deneme</span>` : ""}
@@ -396,7 +507,7 @@ async function projeSayfa(ana, ad, ps) {
   const asamaAd = (OZET.asamalar.find(([k]) => k === p.asama) || [])[1];
   ana.innerHTML = `
   <div class="kart p-bas">
-    <img src="${esc(p.gorsel || "")}" alt="" onerror="this.style.visibility='hidden'">
+    <img src="${esc(p.gorsel || "")}" alt="" referrerpolicy="no-referrer" onerror="gorselHata(this)">
     <div style="flex:1;min-width:240px">
       <div class="flex sarma" style="gap:8px"><h2>${esc(p.marka || p.ad)}</h2>${karar(p.karar)}<span class="k muted">${p.puan ?? "–"}/20</span>
         <span class="rozet r-mor">${esc(asamaAd || "")}</span>${p.zorla ? `<span class="rozet r-gri">deneme projesi</span>` : ""}</div>
@@ -738,3 +849,14 @@ function isTakip(is, bitince) {
 }
 
 ciz();
+
+/* Görsel yüklenemezse bir kez yeniden dene (AliExpress CDN bazen ilk istekte düşüyor), olmazsa yer tutucu göster */
+function gorselHata(img) {
+  if (!img.dataset.tekrar) {
+    img.dataset.tekrar = "1";
+    const s = img.getAttribute("src") || "";
+    if (s) { setTimeout(() => { img.src = s + (s.includes("?") ? "&" : "?") + "r=" + Date.now(); }, 400); return; }
+  }
+  img.style.visibility = "hidden";
+  img.parentElement && img.parentElement.classList.add("gorsel-yok");
+}
