@@ -14,6 +14,7 @@ kaydet, `calistir(p: Proje, args)` yaz, `p.yaz(adim, veri, md)` ile çıktı ver
 - `instagram.md` — bio formülü, 4 öne çıkan, %50 reels / %30 carousel / %20 görsel, 20–30 içerik şartı
 - `reklam.md` — ABO + broad, günlük ≈ 3 × hedef CPA (kodda `reklam.butce_hesapla`), metrik eşikleri, 4 kapatma kuralı (hedef CPA'ya göre), %10–20 ölçekleme; Pixel/CAPI/Purchase testi, bütçe = hedef CPA × 3, retargeting, Lookalike, CBO/ABO
 - `akis.md` — eksik listesi ve uçtan uca akış planı
+- `mert-kurtul.md` — kullanıcının takip ettiği yöntem: Amazon/TikTok filtreleri, yorum hızı, TR doygunluk (yorum<100, 3–5 güçlü rakip, ~20 reklamveren), yerli tedarik, KDV mahsubu, Shopify %2
 Yeni doküman gelirse: `kaynaklar/gelen/`e konur → metni çıkar → ilgili özet dosyasını güncelle → `00-indeks.md`ye satır ekle.
 
 ## Kesin kurallar
@@ -44,3 +45,15 @@ Skor: piyasa (benzer rakip medyanı) fiyatında kâr yoksa (kar_marji=0) toplam 
 Gemini: ücretsiz katmanda model başına ~20 istek/gün; `gemini.py` kota dolunca GEMINI_YEDEK_MODELLER'e (flash-lite) geçer, hepsi doluysa GeminiKota.
 Toptan fiyat: `hat.py sec <proje> tedarik_fiyati=<TL> tedarik_kargo=<TL>` → `Proje.maliyet()` / `fiyat()` yeniden hesaplar. Mağaza bilgisi: `kargo_esigi`, `hazirlik_gun`.
 Uçtan uca test sonuçları ve açık konular: `TEST-RAPORU.md` (test projesi `projeler/tuy-araci`).
+Ürün sinyali (Mert Kurtul yöntemi): `urun-arastirma/sinyal.py` — Amazon "New Releases" (Apify fanndev/amazon-bestsellers-movers-tracker,
+CAPTCHA çözmez, ~0,003 $/ürün; Movers & Shakers listesi boş döndüğü için yeni çıkanlar kullanılıyor) → Mert filtresi → Gemini seçimi (TR'ye lokalleşen,
+problem çözen, sarf/gıda/marka değil) → Trendyol benzer + `rakipler.doygunluk` → `alis_tavani` (TR medyanında %20 net için KDV dahil max toptan alış).
+Kategoriler `sinyal-kategoriler.txt`, aynı gün Amazon listesi önbellekten, `SINYAL_APIFY_TAVAN_USD` (3 $). Panel: "Ürün sinyali" sayfası.
+Maliyet modeli (2026-11-18): senaryo `yerli` (KDV dahil toptan alış + kargo + koli, gümrük yok) varsayılan; `kdv_mahsup` (yerli kalemlerin alış KDV'si düşülür),
+`shopify_komisyonu` %2 (site); `brut_marj_yuzde` (reklam/iade öncesi, hedef %40–50). Skor kapıları: doygunluk "doymus" ve giyim/takı/ayakkabı → en fazla İYİLEŞTİR.
+Meta Reklam Kütüphanesi: `urun-arastirma/reklam_kutuphanesi.py` — herkese açık sayfa, normal Playwright (gizlenme/undetected-chromedriver YOK,
+`facebook-ad-library-scraper` paketi bu yüzden kullanılmadı), aramalar arası 6 sn; ilk sayfadaki farklı reklamveren ≥20 doymuş, 8–19 kalabalık.
+Sinyal akışına bağlı (`--reklam-yok` ile kapatılır).
+Shopify panel: `panel/shopify_baglanti.py` (Admin GraphQL, sadece okuma: mağaza, siparişler→ciro/sipariş/sepet/iade, ürünler; 5 dk önbellek),
+panel "Mağaza (Shopify)" sayfası; anahtarlar panel formuyla `eticaret/.env`'e yazılır (`/api/anahtar`, değer asla geri dönmez, biçim doğrulanır);
+projede "Shopify'a taslak gönder" onay kutusu ister → `hat.py calistir <p> magaza --gonder` (TASLAK). Gerçek mağazayla henüz test edilmedi.

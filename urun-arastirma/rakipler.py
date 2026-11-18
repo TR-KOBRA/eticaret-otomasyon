@@ -51,6 +51,23 @@ def ozet_hesapla(urunler: list[dict]) -> dict:
     }
 
 
+def doygunluk(urunler: list[dict], guclu_esik: int = 100) -> dict:
+    """Mert Kurtul ölçüsü: 100+ yorumlu 'güçlü' rakip sayısı ve en yüksek yorum.
+    uygun: güçlü ≤ 5 ve en yüksek < 700 · kalabalik: güçlü 6–9 ya da en yüksek ≥ 700 · doymus: güçlü ≥ 10."""
+    yorum = [int(u.get("degerlendirme") or 0) for u in urunler]
+    guclu = sum(1 for y in yorum if y >= guclu_esik)
+    en_cok = max(yorum, default=0)
+    favori = sum(int(u.get("favori") or 0) for u in urunler)
+    if guclu >= 10:
+        seviye = "doymus"
+    elif guclu > 5 or en_cok >= 700:
+        seviye = "kalabalik"
+    else:
+        seviye = "uygun"
+    return {"seviye": seviye, "guclu_rakip": guclu, "en_cok_yorum": en_cok, "rakip_sayisi": len(urunler),
+            "toplam_favori": favori, "kural": "güçlü rakip = 100+ yorum; uygun ≤5 ve en çok <700; doymuş ≥10"}
+
+
 def benzer_rakip(rk: dict | None, numaralar: list[int] | None, en_az: int = 3) -> dict | None:
     """Rakip analizinin seçtiği aynı tür/işlevdeki ürünlerle yeni bir rakip verisi döndürür.
     Eşleşme `en_az`dan azsa: fiyat kıyası güvenilmez → ozet boş, `benzer_yok` işaretli (kelime ortalamasına güvenilmez)."""
@@ -58,7 +75,8 @@ def benzer_rakip(rk: dict | None, numaralar: list[int] | None, en_az: int = 3) -
         return rk
     liste = numarali_liste(rk)
     secilen = [liste[i - 1] for i in sorted(set(numaralar)) if 1 <= i <= len(liste)]
-    yeni = {**rk, "tum_ozet": rk.get("tum_ozet") or rk.get("ozet"), "benzer_sayisi": len(secilen), "benzerler": secilen}
+    yeni = {**rk, "tum_ozet": rk.get("tum_ozet") or rk.get("ozet"), "benzer_sayisi": len(secilen), "benzerler": secilen,
+            "doygunluk": doygunluk(secilen)}
     yeni.pop("benzer_yok", None)
     if len(secilen) >= en_az:
         yeni["ozet"] = {**ozet_hesapla(secilen), **{k: v for k, v in (rk.get("ozet") or {}).items() if k.startswith("apify")},

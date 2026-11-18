@@ -23,6 +23,13 @@ YASAKLI_KATEGORI = ["takviye", "supplement", "ilaç", "lens", "bebek maması", "
                     "elektronik sigara", "vape", "bıçak", "silah"]
 
 
+# Yeni başlayana önerilmeyen kategoriler (Mert Kurtul): çok varyasyon, yoğun rekabet, yüksek iade
+BASLANGICA_UYGUN_DEGIL = {
+    "giyim": ["elbise", "dress", "pantolon", "gömlek", "tişört", "t-shirt", "mont", "ceket", "etek", "sweatshirt", "hoodie",
+              "tayt", "kazak", "pijama", "iç çamaşırı", "sütyen", "bluz", "kaban", "eşofman", "sweatshirt", "shirt", "jacket", "hoodie"],
+    "takı": ["kolye", "necklace", "küpe", "earring", "yüzük", "bileklik", "bracelet", "takı", "jewelry", "jewellery"],
+    "ayakkabı": ["ayakkabı", "sneaker", "terlik", "slipper", "bot ", "boots", "sandalet", "sandal"],
+}
 KIRILGAN = ["cam", "glass", "seramik", "ceramic", "porselen", "porcelain", "kristal", "crystal", "ayna", "mirror"]
 SIVI = ["sıvı", "liquid", "yağ", " oil", "esans", "essential", "parfüm", "perfume", "ml", "jel", "gel", "losyon", "sprey", "spray"]
 PIL = ["lityum", "lithium", "li-ion", "battery", "pil ", "batarya", "şarj edilebilir", "rechargeable"]
@@ -100,6 +107,13 @@ def tara(u: dict) -> list[dict]:
     yk = _bul(metin, YASAKLI_KATEGORI)
     if yk:
         r.append({"seviye": "orta", "konu": "Düzenlemeye tabi olabilecek kategori", "detay": ", ".join(yk)})
+    baslik = (u.get("baslik") or "").lower()
+    for kat, kelimeler in BASLANGICA_UYGUN_DEGIL.items():
+        bul = _kelime(baslik, kelimeler)
+        if bul:
+            r.append({"seviye": "orta", "konu": f"Yeni başlayana önerilmeyen kategori: {kat}", "kod": "baslangic_kategori",
+                      "detay": f"{', '.join(bul[:3])}. Çok varyasyon, yoğun rekabet ve yüksek iade; ürünü tasarımla farklılaştıramıyorsan uzak dur."})
+            break
     oz = {k.lower(): str(v).lower() for k, v in (u.get("ozellikler") or {}).items()}
     if any("110v" in v for v in oz.values()):
         r.append({"seviye": "orta", "konu": "Gerilim 110V yazıyor",

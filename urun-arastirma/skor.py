@@ -194,6 +194,14 @@ def puanla(u: dict, secenekler: list[dict], kargo_risk: dict, iade_orani: float,
         karar = "EKSİK VERİ"
         if ek.get("gemini_hata"):
             bayraklar = ["Gemini puanlayamadı → `arastir.py skorla <json>` ile yeniden puanla"] + bayraklar
+    elif toplam >= 15 and ((rk or {}).get("doygunluk") or {}).get("seviye") == "doymus":
+        dg = rk["doygunluk"]
+        karar = "İYİLEŞTİR"
+        bayraklar = [f"Pazar doymuş: Trendyol'da {dg['guclu_rakip']} güçlü rakip (100+ yorum), en çok {dg['en_cok_yorum']} yorum "
+                     "→ ancak net farklılaşmayla girilir"] + bayraklar
+    elif toplam >= 15 and any(r.get("kod") == "baslangic_kategori" for r in (riskler or [])):
+        karar = "İYİLEŞTİR"
+        bayraklar = ["Yeni başlayana önerilmeyen kategori (giyim/takı/ayakkabı) → tasarımla farklılaşmadıkça girme"] + bayraklar
     elif toplam >= 15 and (sonuc.get("kar_marji") or {}).get("puan") == 0:
         # Piyasa fiyatında kâr yoksa diğer kriterler ne kadar iyi olursa olsun test edilmez (fiyat-kar.md: hedef net marj ≥ %20)
         karar = "İYİLEŞTİR"

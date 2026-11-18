@@ -336,6 +336,7 @@ def proje(ad: str):
                            "rapor": bool(kaynak and (KOK / kaynak).with_suffix(".md").exists())}]
                          + [adim_durumu(p, a) for a in ADIMLAR],
         "dosyalar": dosyalar,
+        "kaynak_json": Path(kaynak).name if kaynak and (CIKTI / Path(kaynak).name).exists() else None,
     }
 
 
@@ -485,6 +486,33 @@ def yeni(istek: YeniIstek):
     return {"proje": m.group(1) if m else None, "cikti": r.stdout}
 
 
+SINYAL = CIKTI / "sinyal"
+
+
+@app.get("/api/sinyaller")
+def sinyaller():
+    """Son sinyal çalıştırmalarındaki ürünler (aynı ASIN'in en yenisi), karar sırasına göre."""
+    son: dict[str, dict] = {}
+    calismalar = []
+    for f in sorted(SINYAL.glob("sinyal-*.json")):
+        v = _json(f) or {}
+        calismalar.append({"zaman": v.get("zaman"), "kategoriler": v.get("kategoriler"), "adet": len(v.get("urunler") or []),
+                           "notlar": v.get("notlar") or []})
+        for u in v.get("urunler") or []:
+            u["zaman"] = v.get("zaman")
+            u["usd_tl"] = v.get("usd_tl")
+            son[u.get("asin") or u.get("title")] = u
+    sira = {"TESTE AL": 0, "İYİLEŞTİR": 1, "EKSİK VERİ": 2, "ELE": 3}
+    urunler = sorted(son.values(), key=lambda u: (sira.get(u.get("karar"), 9), -(len(u.get("acilar") or []))))
+    d = _json(SINYAL / "durum.json") or {}
+    return {"urunler": urunler, "calismalar": calismalar[-10:][::-1], "son": d.get("son")}
+
+
+@app.post("/api/sinyal-calistir")
+def sinyal_calistir():
+    return is_baslat("Ürün sinyali (Amazon → Trendyol)", [PY, "-W", "ignore", "sinyal.py"], ARASTIRMA, "sinyal")
+
+
 @app.post("/api/gunluk-calistir")
 def gunluk_calistir():
     return is_baslat("Günlük ürün taraması", [PY, "-W", "ignore", "gunluk.py"], ARASTIRMA, "gunluk")
@@ -620,8 +648,8 @@ def hesapla(h: HesapIstek):
     if h.proje:
         maliyet = _proje(h.proje).maliyet()
     if h.maliyet is not None and h.maliyet >= 0:
-        k = dict((maliyet or {}).get("kalemler") or {"yurtici_kargo": hesap.AYARLAR["yurtici_kargo_tl"], "paketleme": hesap.AYARLAR["paketleme_tl"]})
-        maliyet = {"toplam": h.maliyet, "kalemler": k}
+        # Elle girilen değer: yerli toptancıdan KDV dahil alış fiyatı (+ kargo ve koli varsayımları eklenir)
+        maliyet = hesap.birim_maliyet(h.maliyet, 0, "yerli")
     if not maliyet:
         raise HTTPException(400, "Maliyet gir ya da araştırılmış bir ürün seç")
     ek = {}
@@ -634,7 +662,7 @@ def hesapla(h: HesapIstek):
     r = hesap.fiyat_analizi(satis, maliyet, a)
     mf = hesap.minimum_fiyat(maliyet, a)
     kdv = round(satis - r["kdv_haric"], 2)
-    dagilim = [("Ürün ve getirme", maliyet["toplam"]), ("KDV", kdv), ("Komisyon", r["komisyon"]),
+    dagilim = [("Ürün, kargo, koli", r["net_maliyet"]), ("KDV (net)", round(kdv - r["mahsup_kdv"], 2)), ("Komisyon", r["komisyon"]),
                ("Beklenen iade", r["iade_maliyeti"]), ("Reklam", r["reklam_payi"]), ("Net kâr", r["birim_kar"])]
 
     def paket(n, oran):
@@ -722,6 +750,88 @@ def app_js():
 def app_css():
     return FileResponse(PANEL / "app.css", media_type="text/css")
 
+
+
+# ---------------------------------------------------------------- Shopify (okuma) + anahtar formu + taslak ürün
+import shopify_baglanti as _shopify  # noqa: E402
+
+ENV_DOSYA = KOK / ".env"
+ANAHTAR_KURAL = {
+    "SHOPIFY_MAGAZA": (r"^[a-z0-9][a-z0-9-]*\.myshopify\.com$", "xxx.myshopify.com biçiminde olmalı"),
+    "SHOPIFY_ADMIN_TOKEN": (r"^shpat_[A-Za-z0-9]{20,}$", "shpat_ ile başlayan Admin API erişim anahtarı olmalı"),
+    "META_ERISIM_TOKENI": (r"^[A-Za-z0-9_\-]{30,}$", "Meta sistem kullanıcısı erişim anahtarı"),
+    "META_REKLAM_HESABI": (r"^act_\d{5,}$", "act_ ile başlayan reklam hesabı numarası"),
+    "META_PIXEL_ID": (r"^\d{5,}$", "sadece rakam"),
+}
+
+
+class AnahtarIstek(BaseModel):
+    anahtar: str
+    deger: str
+
+
+@app.post("/api/anahtar")
+def anahtar_kaydet(istek: AnahtarIstek):
+    """Anahtarı eticaret/.env dosyasına yazar (yalnızca bu bilgisayar). Değer hiçbir yanıtta geri dönmez."""
+    kural = ANAHTAR_KURAL.get(istek.anahtar)
+    deger = (istek.deger or "").strip()
+    if not kural:
+        raise HTTPException(400, "Bu anahtar panelden eklenemez")
+    if istek.anahtar == "SHOPIFY_MAGAZA":
+        deger = re.sub(r"^https?://", "", deger).strip("/").lower()
+    if not re.fullmatch(kural[0], deger):
+        raise HTTPException(400, f"Geçersiz değer: {kural[1]}")
+    satirlar = ENV_DOSYA.read_text(encoding="utf-8").splitlines() if ENV_DOSYA.exists() else []
+    satirlar = [x for x in satirlar if not x.startswith(istek.anahtar + "=")] + [f"{istek.anahtar}={deger}"]
+    ENV_DOSYA.write_text("\n".join(satirlar) + "\n", encoding="utf-8")
+    os.environ[istek.anahtar] = deger
+    _shopify.temizle()
+    return {"tamam": True, "anahtar": istek.anahtar, "shopify_bagli": _shopify.yapilandirildi()}
+
+
+@app.get("/api/shopify")
+def shopify_durum():
+    if not _shopify.yapilandirildi():
+        return {"bagli": False, "eksik": [k for k in ("SHOPIFY_MAGAZA", "SHOPIFY_ADMIN_TOKEN") if not os.getenv(k)]}
+    try:
+        return {"bagli": True, "magaza": _shopify.magaza()}
+    except _shopify.ShopifyHata as e:
+        return {"bagli": True, "hata": str(e)}
+
+
+@app.get("/api/shopify/satis")
+def shopify_satis(gun: int = 30):
+    if gun not in (7, 30, 90):
+        raise HTTPException(400, "gun 7, 30 ya da 90 olmalı")
+    try:
+        return _shopify.satis(gun)
+    except _shopify.ShopifyHata as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/shopify/urunler")
+def shopify_urunler():
+    try:
+        return _shopify.urunler()
+    except _shopify.ShopifyHata as e:
+        raise HTTPException(400, str(e))
+
+
+class TaslakIstek(BaseModel):
+    onay: bool = False
+
+
+@app.post("/api/proje/{ad}/shopify-taslak")
+def shopify_taslak(ad: str, istek: TaslakIstek):
+    """Ürünü Shopify'a TASLAK olarak gönderir (yayına almaz). Panelde ayrı onay ister."""
+    p = _proje(ad)
+    if not istek.onay:
+        raise HTTPException(400, "Onay gerekli")
+    if not _shopify.yapilandirildi():
+        raise HTTPException(400, "Shopify bağlı değil: Mağaza sayfasından bağla")
+    if not p.oku("magaza"):
+        raise HTTPException(400, "Önce mağaza adımını çalıştır")
+    return is_baslat(f"{p.ad}: Shopify'a taslak ürün", [PY, "-W", "ignore", "hat.py", "calistir", p.ad, "magaza", "--gonder"], KOK, f"proje:{p.ad}")
 
 if __name__ == "__main__":
     port = int(os.getenv("PANEL_PORT", "8765"))

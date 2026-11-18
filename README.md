@@ -31,6 +31,19 @@ Masaüstündeki **E-ticaret Paneli** kısayolu ya da `panel/panel_ac.cmd` → ht
 
 Panel komutları mevcut CLI'lar üzerinden çalıştırır. Shopify/Meta gönderimi (`--gonder`) panelde yoktur.
 
+## Ürün sinyali (Mert Kurtul yöntemi)
+
+`python urun-arastirma/sinyal.py` (ya da panel → Ürün sinyali → Yeni sinyal çek): Amazon'da **yeni çıkıp yükselen** ürünler →
+puan ≥ 3,5, fiyat 6–100 $, yorum ≤ 1000 → yapay zekâ Türkiye'ye uygun, problem çözen ürünleri seçer → Trendyol'da aynı tür ürünler ve
+**doygunluk** (100+ yorumlu güçlü rakip ≤ 5 uygun, ≥ 10 doymuş) → **alış tavanı**: Trendyol medyanında %20 net kâr için toptancıdan en fazla
+kaça (KDV dahil) alınmalı. Karar Olur / Belki / Olmaz. Bir çalıştırma ≈ 0,30–0,50 $ (aylık 3 $ tavanı).
+
+## Shopify (panel → Mağaza)
+
+Shopify yönetici → Ayarlar → Uygulamalar → Uygulama geliştir → özel uygulama, kapsamlar `read_orders`, `read_products`, `write_products`.
+Mağaza adresini ve `shpat_…` anahtarını panelde **Mağaza** sayfasından gir (sadece bu bilgisayardaki `.env`'e yazılır).
+Sonra: son 7/30/90 gün ciro, sipariş, ortalama sepet, iade ve ürünler; projeden onaylı **taslak** ürün gönderimi. Panel sipariş, fiyat ya da tema değiştirmez.
+
 ## Günlük tarama
 
 Windows Görev Zamanlayıcı her gün 09:00'da `urun-arastirma/gunluk_calistir.cmd` çalıştırır (bilgisayar kapalıysa açılınca):

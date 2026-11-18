@@ -81,7 +81,7 @@ def calistir(p: Proje, args=None):
            "2. Her satıcıya aşağıdaki mesajı gönder (AliExpress mesajlaşma). **Gönderimi sen yaparsın.**",
            "3. En iyi 1–2 satıcıdan **numune** sipariş et ve kontrol listesini doldur.",
            "4. Satıcı **toptan fiyat** verince sisteme gir (adet başı ürün TL; varsa adet başı uluslararası kargo):",
-           f"   `python hat.py sec {p.ad} tedarik_fiyati=<TL> tedarik_kargo=<TL>` ya da panelde Proje → Ayarlar. "
+           f"   `python hat.py sec {p.ad} tedarik_fiyati=<KDV dahil TL>` (yerli toptancı; ithalatta ayrıca tedarik_kargo=<TL>) ya da panelde Proje → Ayarlar. "
            "Fiyat, kâr ve reklam eşikleri bu maliyetle yeniden hesaplanır.",
            f"   Şu an hesapta: tek adet AliExpress fiyatı **{tl((p.veri.get('maliyet') or {}).get('stok', {}).get('kalemler', {}).get('urun'))}** "
            f"→ birim maliyet **{tl(p.maliyet()['toplam'])}**" + (" (toptan fiyat girildi)" if p.secim('tedarik_fiyati') else " (toptan fiyat henüz yok)") + ".",

@@ -147,11 +147,14 @@ class Proje:
         tf = self.secim("tedarik_fiyati")
         if not tf:
             return m
-        a = {k: v for k, v in (self.veri.get("ayarlar") or {}).items() if k in hesap.AYARLAR}
-        if self.secim("tedarik_kargo") not in (None, ""):          # tedarikçinin adet başı kargosu navlun varsayımının yerine geçer
+        a = {**hesap.AYARLAR, **{k: v for k, v in (self.veri.get("ayarlar") or {}).items() if k in hesap.AYARLAR}}
+        # Varsayılan: Türkiye'deki toptancı/üretici (KDV dahil alış fiyatı, gümrük/navlun yok).
+        # tedarik_tipi=ithal ya da tedarik_kargo girilirse eski ithalat hesabı (navlun + gümrük) kullanılır.
+        ithal = self.secim("tedarik_tipi") == "ithal" or self.secim("tedarik_kargo") not in (None, "")
+        if ithal and self.secim("tedarik_kargo") not in (None, ""):   # tedarikçinin adet başı kargosu navlun varsayımının yerine geçer
             a["stok_navlun_tl"] = float(self.secim("tedarik_kargo"))
-        yeni = hesap.birim_maliyet(float(tf), 0, "stok", a)
-        yeni["kaynak"] = "tedarikçi toptan fiyatı"
+        yeni = hesap.birim_maliyet(float(tf), 0, "stok" if ithal else "yerli", a)
+        yeni["kaynak"] = "tedarikçi toptan fiyatı" + (" (ithal)" if ithal else " (yerli, KDV dahil)")
         return yeni
 
     def fiyat(self) -> dict:

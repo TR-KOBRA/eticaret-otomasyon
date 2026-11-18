@@ -1,0 +1,9 @@
+# Amazon kategori slug'ları (sinyal.py sırayla döner). Mert Kurtul: giyim/takı/ayakkabı, gıda ve sarf ürünlerinden uzak dur.
+pet-supplies
+kitchen
+home-garden
+baby-products
+office-products
+automotive
+sporting-goods
+hi                # Tools & Home Improvement

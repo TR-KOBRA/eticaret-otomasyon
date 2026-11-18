@@ -7,12 +7,16 @@ from __future__ import annotations
 
 import math
 
-AYARLAR_SON_KONTROL = "2026-11-14"   # oranlar değişir; bu tarihten sonra güncelliğini kontrol et
+AYARLAR_SON_KONTROL = "2026-11-18"   # oranlar değişir; bu tarihten sonra güncelliğini kontrol et
 
 AYARLAR = {
     "kdv": 0.20,                 # satış KDV'si
     "odeme_komisyonu": 0.035,    # sanal POS / iyzico (taksit farkı hariç, ortalama)
     "pazaryeri_komisyonu": 0.0,  # kanal = trendyol ise KANALLAR'dan gelir
+    "shopify_komisyonu": 0.02,   # Shopify Payments Türkiye'de yok → harici ödeme altyapısında işlem ücreti (Basic ~%2)
+    # KDV mahsubu: faturalı YERLİ alımlarda (ürün, kargo, koli) ödenen KDV, satıştaki KDV'den düşülür → maliyet KDV hariç sayılır.
+    # (Mert Kurtul: "KDV maliyete eklenmez". Şirket/şahıs işletmesi yokken mahsup yapılamaz → False yap. Muhasebeciyle teyit et.)
+    "kdv_mahsup": True,
     "reklam_payi": 0.20,         # satışın %'si (dokümanlardaki referans dağılım: %15–25)
     "hedef_marj": 0.20,          # net (reklam + iade sonrası) hedef marj, en az %20
     # İade: oran ≠ maliyet. Beklenen iade maliyeti = oran × (gidiş + dönüş kargo + paketleme + kayıp × ürün)
@@ -31,8 +35,8 @@ AYARLAR = {
 
 # Kanal farkları. Trendyol komisyonu kategoriye göre değişir (~%10–25); ürünün kategorisine göre güncelle.
 KANALLAR = {
-    "site": {"odeme_komisyonu": 0.035, "pazaryeri_komisyonu": 0.0, "reklam_payi": 0.20},
-    "trendyol": {"odeme_komisyonu": 0.0, "pazaryeri_komisyonu": 0.20, "reklam_payi": 0.08},
+    "site": {"odeme_komisyonu": 0.035, "pazaryeri_komisyonu": 0.0, "shopify_komisyonu": 0.02, "reklam_payi": 0.20},
+    "trendyol": {"odeme_komisyonu": 0.0, "pazaryeri_komisyonu": 0.20, "shopify_komisyonu": 0.0, "reklam_payi": 0.08},
 }
 
 YUKSEK_IADE_KELIMELERI = ["beden", "size", "numara", "ayakkabı", "shoe", "elbise", "dress", "pantolon", "gömlek",
@@ -52,6 +56,25 @@ def iade_orani_tahmini(u: dict) -> tuple[float, str]:
     return AYARLAR["iade_orani"], "standart ürün"
 
 
+# KDV dahil ödenen ve faturalı alındığında mahsup edilebilen yerli kalemler
+MAHSUP_KALEMLERI = ("yurtici_kargo", "paketleme")
+
+
+def indirilecek_kdv(maliyet: dict, a: dict) -> float:
+    """Birim maliyetin içindeki, satış KDV'sinden düşülebilecek alış KDV'si (TL)."""
+    if not a.get("kdv_mahsup"):
+        return 0.0
+    k = maliyet.get("kalemler", {})
+    kalemler = list(MAHSUP_KALEMLERI) + (["urun"] if maliyet.get("senaryo") == "yerli" else [])
+    brut = sum(float(k.get(x) or 0) for x in kalemler)
+    return round(brut * a["kdv"] / (1 + a["kdv"]), 2)
+
+
+def net_maliyet(maliyet: dict, a: dict) -> float:
+    """Kâr hesabında kullanılan maliyet: toplam − mahsup edilen alış KDV'si."""
+    return round(maliyet["toplam"] - indirilecek_kdv(maliyet, a), 2)
+
+
 def iade_maliyeti(maliyet: dict, a: dict) -> float:
     """Satılan her adet için beklenen iade maliyeti (TL)."""
     k = maliyet.get("kalemler", {})
@@ -61,13 +84,13 @@ def iade_maliyeti(maliyet: dict, a: dict) -> float:
 
 
 def yuzdesel_kesinti(a: dict) -> float:
-    return a["odeme_komisyonu"] + a["pazaryeri_komisyonu"] + a["reklam_payi"]
+    return a["odeme_komisyonu"] + a["pazaryeri_komisyonu"] + a.get("shopify_komisyonu", 0) + a["reklam_payi"]
 
 
 def minimum_fiyat(maliyet: dict, a: dict) -> float:
     """Net marj = hedef olacak en düşük KDV dahil satış fiyatı.
     Kâr = P/(1+KDV) − sabit − P × kesintiler = hedef × P  →  P = sabit / (1/(1+KDV) − kesintiler − hedef)."""
-    sabit = maliyet["toplam"] + iade_maliyeti(maliyet, a)
+    sabit = net_maliyet(maliyet, a) + iade_maliyeti(maliyet, a)
     payda = 1 / (1 + a["kdv"]) - yuzdesel_kesinti(a) - a["hedef_marj"]
     return round(sabit / payda, 2) if payda > 0 else float("inf")
 
@@ -83,6 +106,11 @@ def psikolojik(fiyat: float) -> int:
 def birim_maliyet(urun_tl: float, kargo_tl: float, senaryo: str = "stok", a: dict | None = None) -> dict:
     a = {**AYARLAR, **(a or {})}
     kalemler = {"urun": urun_tl}
+    if senaryo == "yerli":
+        # Türkiye'deki toptancı / üretici: urun_tl = KDV dahil alış fiyatı; gümrük ve navlun yok
+        kalemler["paketleme"] = a["paketleme_tl"]
+        kalemler["yurtici_kargo"] = a["yurtici_kargo_tl"]
+        return {"senaryo": senaryo, "kalemler": kalemler, "toplam": round(sum(kalemler.values()), 2)}
     if senaryo == "stok":
         kalemler["navlun"] = a["stok_navlun_tl"]
         kalemler["ithalat_vergi_araci"] = round((urun_tl + a["stok_navlun_tl"]) * a["stok_ithalat_orani"], 2)
@@ -101,10 +129,13 @@ def fiyat_analizi(satis_fiyati: float, maliyet: dict | float, a: dict | None = N
         maliyet = {"toplam": maliyet, "kalemler": {}}
     P = satis_fiyati
     kdv_haric = P / (1 + a["kdv"])
-    komisyon = P * (a["odeme_komisyonu"] + a["pazaryeri_komisyonu"])
+    komisyon = P * (a["odeme_komisyonu"] + a["pazaryeri_komisyonu"] + a.get("shopify_komisyonu", 0))
     iade = iade_maliyeti(maliyet, a)
     reklam = P * a["reklam_payi"]
-    reklam_oncesi_kar = kdv_haric - maliyet["toplam"] - komisyon - iade
+    mahsup = indirilecek_kdv(maliyet, a)
+    m_net = maliyet["toplam"] - mahsup
+    brut_kar = kdv_haric - m_net - komisyon                       # reklam ve iade öncesi (Mert: hedef %40–50)
+    reklam_oncesi_kar = brut_kar - iade
     net_kar = reklam_oncesi_kar - reklam
     ro_marj = reklam_oncesi_kar / P if P else 0
     net_marj = net_kar / P if P else 0
@@ -112,6 +143,8 @@ def fiyat_analizi(satis_fiyati: float, maliyet: dict | float, a: dict | None = N
         "fiyat": P,
         "kdv_haric": round(kdv_haric, 2),
         "komisyon": round(komisyon, 2),
+        "mahsup_kdv": mahsup, "net_maliyet": round(m_net, 2),
+        "brut_kar": round(brut_kar, 2), "brut_marj_yuzde": round(brut_kar / P * 100, 1) if P else 0,
         "iade_maliyeti": iade,
         "reklam_payi": round(reklam, 2),
         "reklam_oncesi_kar": round(reklam_oncesi_kar, 2),
